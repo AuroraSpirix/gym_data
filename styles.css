@@ -26,15 +26,15 @@ html, body {
   display: flex;
   flex-direction: column;
   background: var(--black);
-  transform: translateX(100%);
-  transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
-  will-change: transform;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
 }
-.screen.active  { transform: translateX(0); }
-.screen.leaving { transform: translateX(-40%); }
+.screen.active  { opacity: 1; pointer-events: all; }
+.screen.leaving { opacity: 0; }
 
 /* ── HOME ── */
-#screen-home { flex-direction: column; transform: translateX(0); }
+#screen-home { flex-direction: column; }
 
 .home-half {
   flex: 1;
@@ -128,23 +128,27 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  width: 100%;
+  min-width: 0;
 }
 .rep-logger-header {
   display: grid;
-  grid-template-columns: 30px 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: 28px 1fr 1fr;
+  gap: 6px;
   padding: 0 2px;
 }
 .rep-col-label {
   font-size: 9px;
   letter-spacing: 0.2em;
   color: var(--mid);
+  min-width: 0;
 }
 .rep-row {
   display: grid;
-  grid-template-columns: 30px 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: 28px 1fr 1fr;
+  gap: 6px;
   align-items: center;
+  min-width: 0;
 }
 .rep-num {
   font-size: 11px;
@@ -215,9 +219,11 @@ html, body {
   color: var(--white);
   font-family: var(--font-body);
   font-size: 13px;
-  padding: 10px 12px;
+  padding: 10px 8px;
   outline: none;
   flex: 1;
+  min-width: 0;
+  width: 100%;
   letter-spacing: 0.05em;
   -webkit-appearance: none;
   border-radius: 0;
@@ -259,10 +265,13 @@ html, body {
   background: #111;
   border-top: 1px solid var(--line);
   width: 100%;
-  padding: 24px 20px;
+  max-width: 100vw;
+  box-sizing: border-box;
+  padding: 24px 16px;
   display: flex;
   flex-direction: column;
   gap: 18px;
+  overflow: hidden;
 }
 .modal-title-row {
   display: flex;
