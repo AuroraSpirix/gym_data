@@ -1,20 +1,19 @@
+// ── SUPABASE ───────────────────────────────────────────
+const SUPABASE_URL = 'https://ivjrmhprkgsviyqmvfdv.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_XsA5mZBS--3Wpj6aUuI3oQ_HdBv05rP';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 // ── STATE ──────────────────────────────────────────────
 const state = {
   currentWorkout: null,
   currentExerciseId: null,
-  data: loadData()
+  user: null,
+  data: defaultData()
 };
-
-function loadData() {
-  try {
-    return JSON.parse(localStorage.getItem('grind_data')) || defaultData();
-  } catch { return defaultData(); }
-}
 
 function defaultData() {
   return {
     workouts: { push: [], pull: [], legs: [] },
-    dailyLog: [], // [ { date, type: 'push'|'pull'|'legs', snapshot: [...exercises] } ]
     foods: []
   };
 }
@@ -23,58 +22,180 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function save() {
-  localStorage.setItem('grind_data', JSON.stringify(state.data));
-}
-
 function findExercise() {
   return state.data.workouts[state.currentWorkout]
     .find(e => e.id === state.currentExerciseId);
 }
 
-// Save a daily snapshot whenever workout data changes for today
-function saveDailyLog() {
-  if (!state.currentWorkout) return;
+// ── SYNC INDICATOR ─────────────────────────────────────
+let syncTimeout = null;
+function showSync(msg = '↑', isError = false) {
+  const el = document.getElementById('sync-indicator');
+  el.textContent = msg;
+  el.className = 'sync-indicator' + (isError ? ' error' : '');
+  clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(() => el.classList.add('hidden'), 1800);
+}
+
+// ── LOCAL CACHE ────────────────────────────────────────
+function saveLocal() {
+  try { localStorage.setItem('grind_data', JSON.stringify(state.data)); } catch {}
+}
+function loadLocal() {
+  try { return JSON.parse(localStorage.getItem('grind_data')) || defaultData(); } catch { return defaultData(); }
+}
+
+// ── SUPABASE: GYM ──────────────────────────────────────
+async function syncGymToCloud() {
+  if (!state.user || !state.currentWorkout) return;
   const today = new Date().toDateString();
   const exercises = state.data.workouts[state.currentWorkout];
 
-  // Only snapshot exercises that have a set logged today
-  const todayExercises = exercises
-    .map(ex => {
-      const todaySets = ex.sets.filter(s => new Date(s.date).toDateString() === today);
-      if (!todaySets.length) return null;
-      return { id: ex.id, name: ex.name, sets: todaySets };
-    })
-    .filter(Boolean);
+  const todayExercises = exercises.map(ex => {
+    const todaySets = ex.sets.filter(s => new Date(s.date).toDateString() === today);
+    return { id: ex.id, name: ex.name, notes: ex.notes || '', sets: todaySets };
+  });
 
-  if (!todayExercises.length) return;
+  // Always upsert the full exercise list structure (for names/notes persistence)
+  const fullSnapshot = exercises.map(ex => ({
+    id: ex.id, name: ex.name, notes: ex.notes || '',
+    sets: ex.sets
+  }));
 
-  if (!state.data.dailyLog) state.data.dailyLog = [];
+  const { error } = await sb.from('gym_logs').upsert({
+    user_id: state.user.id,
+    date: today,
+    type: state.currentWorkout,
+    snapshot: fullSnapshot,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id,date,type' });
 
-  const existing = state.data.dailyLog.find(
-    d => d.date === today && d.type === state.currentWorkout
-  );
-  if (existing) {
-    existing.snapshot = todayExercises;
-    existing.updatedAt = new Date().toISOString();
-  } else {
-    state.data.dailyLog.push({
-      date: today,
-      type: state.currentWorkout,
-      snapshot: todayExercises,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-  }
-  save();
+  if (error) { showSync('⚠', true); console.error(error); }
+  else showSync('✓');
 }
+
+async function loadGymFromCloud() {
+  if (!state.user) return;
+  // Load all gym logs to rebuild full exercise history
+  const { data, error } = await sb.from('gym_logs')
+    .select('*')
+    .eq('user_id', state.user.id)
+    .order('date', { ascending: false });
+
+  if (error) { console.error(error); return; }
+  if (!data || !data.length) return;
+
+  // Rebuild workouts: merge all historical snapshots, latest wins for each exercise
+  const workouts = { push: [], pull: [], legs: [] };
+
+  // Process oldest to newest so latest overwrites
+  [...data].reverse().forEach(log => {
+    const type = log.type;
+    if (!workouts[type]) return;
+    log.snapshot.forEach(ex => {
+      const existing = workouts[type].find(e => e.id === ex.id);
+      if (existing) {
+        existing.name = ex.name;
+        existing.notes = ex.notes || '';
+        // Merge sets by date, avoiding duplicates
+        ex.sets.forEach(s => {
+          const dup = existing.sets.find(es => es.date === s.date);
+          if (!dup) existing.sets.push(s);
+        });
+      } else {
+        workouts[type].push({ ...ex, sets: [...ex.sets] });
+      }
+    });
+  });
+
+  state.data.workouts = workouts;
+  saveLocal();
+}
+
+// ── SUPABASE: FOODS ─────────────────────────────────────
+async function syncFoodsToCloud() {
+  if (!state.user) return;
+  const today = new Date().toDateString();
+  const { error } = await sb.from('food_logs').upsert({
+    user_id: state.user.id,
+    date: today,
+    foods: state.data.foods,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id,date' });
+
+  if (error) { showSync('⚠', true); console.error(error); }
+  else showSync('✓');
+}
+
+async function loadFoodsFromCloud() {
+  if (!state.user) return;
+  const today = new Date().toDateString();
+  const { data, error } = await sb.from('food_logs')
+    .select('*')
+    .eq('user_id', state.user.id)
+    .eq('date', today)
+    .single();
+
+  if (error && error.code !== 'PGRST116') { console.error(error); return; }
+  if (data) {
+    state.data.foods = data.foods || [];
+    saveLocal();
+  }
+}
+
+// ── AUTH ────────────────────────────────────────────────
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session?.user) {
+    state.user = session.user;
+    await onLogin();
+  }
+  // else stay on login screen
+}
+
+async function onLogin() {
+  // Load local first for instant feel, then sync from cloud
+  state.data = loadLocal();
+  renderExercises();
+  showScreen('home');
+  await loadGymFromCloud();
+  await loadFoodsFromCloud();
+  renderExercises();
+}
+
+document.getElementById('login-btn').addEventListener('click', async () => {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.classList.add('hidden');
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    errEl.textContent = error.message;
+    errEl.classList.remove('hidden');
+    return;
+  }
+  state.user = data.user;
+  await onLogin();
+});
+
+// Allow Enter key on password field
+document.getElementById('login-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('login-btn').click();
+});
+
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  await sb.auth.signOut();
+  state.user = null;
+  state.data = defaultData();
+  showScreen('login');
+});
 
 // ── NAVIGATION ─────────────────────────────────────────
 function showScreen(id) {
   const current = document.querySelector('.screen.active');
   const next = document.getElementById('screen-' + id);
   if (!next || next === current) return;
-
   if (current) {
     current.classList.remove('active');
     current.classList.add('leaving');
@@ -108,6 +229,7 @@ document.querySelectorAll('.back-btn').forEach(btn => {
 // ── WORKOUT / EXERCISES ────────────────────────────────
 function renderExercises() {
   const list = document.getElementById('exercise-list');
+  if (!state.currentWorkout) return;
   const exercises = state.data.workouts[state.currentWorkout];
   list.innerHTML = '';
   exercises.forEach((ex) => {
@@ -134,13 +256,14 @@ document.getElementById('add-exercise-btn').addEventListener('click', () => {
   const input = document.getElementById('exercise-name-input');
   const name = input.value.trim();
   if (!name) return;
-  state.data.workouts[state.currentWorkout].push({ id: generateId(), name, sets: [] });
-  save();
+  state.data.workouts[state.currentWorkout].push({ id: generateId(), name, sets: [], notes: '' });
+  saveLocal();
+  syncGymToCloud();
   input.value = '';
   renderExercises();
 });
 
-// ── SET MODAL ──────────────────────────────────────────────
+// ── SET MODAL ──────────────────────────────────────────
 const titleEl = document.getElementById('modal-exercise-name');
 let longPressTimer = null;
 
@@ -149,22 +272,29 @@ function openSetModal(exerciseId) {
   const ex = findExercise();
   titleEl.contentEditable = 'false';
   titleEl.textContent = ex.name;
-  // Notes
+
   const notesPanel = document.getElementById('modal-notes-panel');
   const notesText = document.getElementById('modal-notes-text');
   notesPanel.classList.add('hidden');
   document.getElementById('modal-notes-btn').classList.remove('active');
   notesText.value = ex.notes || '';
-  // Sets — always exactly 3
+
   document.getElementById('rep-rows').innerHTML = '';
-  buildSetRow(1);
-  buildSetRow(2);
-  buildSetRow(3);
+
+  // Pre-fill today's sets if already logged
+  const today = new Date().toDateString();
+  const todayEntry = ex.sets.find(s => new Date(s.date).toDateString() === today);
+  const todaySets = todayEntry ? todayEntry.sets : [];
+
+  for (let i = 0; i < 3; i++) {
+    buildSetRow(i + 1, todaySets[i] || null);
+  }
+
   renderModalHistory(ex);
   document.getElementById('modal-set').classList.remove('hidden');
 }
 
-// ── INLINE LONG-PRESS RENAME ───────────────────────────────────────────
+// ── INLINE LONG-PRESS RENAME ───────────────────────────
 function startLongPress() {
   longPressTimer = setTimeout(() => {
     titleEl.contentEditable = 'true';
@@ -193,14 +323,14 @@ titleEl.addEventListener('blur', () => {
   titleEl.contentEditable = 'false';
   if (newName) {
     const ex = findExercise();
-    if (ex) { ex.name = newName; save(); renderExercises(); }
+    if (ex) { ex.name = newName; saveLocal(); syncGymToCloud(); renderExercises(); }
     titleEl.textContent = newName;
   } else {
     titleEl.textContent = findExercise()?.name || '';
   }
 });
 
-// ── NOTES ──────────────────────────────────────────────────────
+// ── NOTES ──────────────────────────────────────────────
 document.getElementById('modal-notes-btn').addEventListener('click', () => {
   const panel = document.getElementById('modal-notes-panel');
   const btn = document.getElementById('modal-notes-btn');
@@ -213,10 +343,12 @@ document.getElementById('modal-notes-text').addEventListener('input', () => {
   const ex = findExercise();
   if (!ex) return;
   ex.notes = document.getElementById('modal-notes-text').value;
-  save();
+  saveLocal();
+  syncGymToCloud();
 });
 
-// ── AUTO-SAVE SETS ─────────────────────────────────────────────────────
+// ── AUTO-SAVE SETS ─────────────────────────────────────
+let saveDebounce = null;
 function autoSaveSets() {
   const rows = document.querySelectorAll('#rep-rows .rep-row');
   const sets = [];
@@ -236,20 +368,22 @@ function autoSaveSets() {
   } else if (sets.length > 0) {
     ex.sets.push({ sets, date: new Date().toISOString() });
   }
-  save();
-  saveDailyLog();
+  saveLocal();
   renderExercises();
   renderModalHistory(ex);
+
+  clearTimeout(saveDebounce);
+  saveDebounce = setTimeout(() => syncGymToCloud(), 1200);
 }
 
-function buildSetRow(num) {
+function buildSetRow(num, prefill = null) {
   const container = document.getElementById('rep-rows');
   const row = document.createElement('div');
   row.className = 'rep-row';
   row.innerHTML = `
     <span class="rep-num">${num}</span>
-    <input type="number" class="text-input set-weight-input" placeholder="0" inputmode="decimal" />
-    <input type="number" class="text-input set-reps-input" placeholder="0" inputmode="numeric" />
+    <input type="number" class="text-input set-weight-input" placeholder="0" inputmode="decimal" value="${prefill ? prefill.weight : ''}" />
+    <input type="number" class="text-input set-reps-input" placeholder="0" inputmode="numeric" value="${prefill ? prefill.reps : ''}" />
   `;
   row.querySelector('.set-weight-input').addEventListener('input', autoSaveSets);
   row.querySelector('.set-reps-input').addEventListener('input', autoSaveSets);
@@ -306,7 +440,8 @@ function renderFoods() {
   list.querySelectorAll('.delete-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       state.data.foods.splice(parseInt(btn.dataset.index), 1);
-      save();
+      saveLocal();
+      syncFoodsToCloud();
       renderFoods();
     });
   });
@@ -318,7 +453,8 @@ document.getElementById('add-food-btn').addEventListener('click', () => {
   const protein = parseInt(document.getElementById('food-protein-input').value) || 0;
   if (!name) return;
   state.data.foods.push({ name, cal, protein });
-  save();
+  saveLocal();
+  syncFoodsToCloud();
   document.getElementById('food-name-input').value = '';
   document.getElementById('food-cal-input').value = '';
   document.getElementById('food-protein-input').value = '';
@@ -380,4 +516,5 @@ timerDisplay.addEventListener('click', () => {
 });
 timerResetBtn.addEventListener('click', resetTimer);
 
-// Don't auto-start — remove old auto-start listeners by not re-adding them
+// ── BOOT ───────────────────────────────────────────────
+init();

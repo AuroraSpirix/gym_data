@@ -7,8 +7,22 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+
+  <!-- LOGIN SCREEN -->
+  <div id="screen-login" class="screen active">
+    <div class="login-body">
+      <div class="login-logo">GRIND</div>
+      <div class="login-fields">
+        <input type="email" id="login-email" class="text-input" placeholder="Email" autocomplete="email" />
+        <input type="password" id="login-password" class="text-input" placeholder="Password" autocomplete="current-password" />
+        <button class="icon-btn login-btn" id="login-btn">→</button>
+        <div id="login-error" class="login-error hidden"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- HOME SCREEN -->
-  <div id="screen-home" class="screen active">
+  <div id="screen-home" class="screen">
     <div class="home-half" id="btn-gym">
       <div class="home-label">
         <span class="home-label-sub">TRACK YOUR</span>
@@ -22,6 +36,7 @@
         <span class="home-label-main">CALORIES</span>
       </div>
     </div>
+    <button id="logout-btn" class="logout-btn">⏻</button>
   </div>
 
   <!-- GYM SCREEN -->
@@ -45,7 +60,7 @@
     </div>
   </div>
 
-  <!-- WORKOUT SCREEN (Push/Pull/Legs detail) -->
+  <!-- WORKOUT SCREEN -->
   <div id="screen-workout" class="screen">
     <div class="top-bar">
       <button class="back-btn" data-target="gym">←</button>
@@ -116,6 +131,10 @@
     </div>
   </div>
 
+  <!-- SYNC INDICATOR -->
+  <div id="sync-indicator" class="sync-indicator hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="script.js"></script>
 </body>
 </html>
