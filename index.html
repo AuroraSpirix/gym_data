@@ -119,15 +119,56 @@
           <span class="cal-total-label">PROTEIN (g)</span>
         </div>
       </div>
+      <div id="past-food-header" class="past-food-header hidden">
+        <button type="button" class="back-btn" id="past-food-back">←</button>
+        <span class="past-food-title" id="past-food-title">BREAKFAST</span>
+      </div>
       <div id="food-list" class="food-list"></div>
-      <div class="add-food-block">
-        <input type="text" id="food-name-input" class="text-input" placeholder="Food name" />
-        <div class="add-food-row">
-          <input type="number" id="food-cal-input" class="text-input small" placeholder="kcal" />
-          <input type="number" id="food-protein-input" class="text-input small" placeholder="protein g" />
-          <button class="icon-btn" id="add-food-btn">+</button>
+      <div class="cal-bottom">
+        <div id="cal-action-split" class="cal-action-split">
+          <button type="button" class="cal-action-btn" id="btn-add-food-mode">ADD FOOD</button>
+          <div class="cal-divider"></div>
+          <button type="button" class="cal-action-btn" id="btn-past-food-mode">PAST FOOD</button>
+        </div>
+        <div id="add-food-panel" class="add-food-panel hidden">
+          <button type="button" class="cal-panel-back" id="add-food-back">← BACK</button>
+          <input type="text" id="food-name-input" class="text-input" placeholder="Food name" />
+          <div class="add-food-row">
+            <input type="number" id="food-cal-input" class="text-input small" placeholder="kcal" />
+            <input type="number" id="food-protein-input" class="text-input small" placeholder="protein g" />
+            <button type="button" class="icon-btn" id="add-food-btn">+</button>
+          </div>
+        </div>
+        <div id="past-food-categories" class="past-food-categories hidden">
+          <button type="button" class="cal-panel-back" id="past-categories-back">← BACK</button>
+          <div class="meal-grid" id="meal-category-grid"></div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- FOOD TAG PICKER -->
+  <div id="modal-food-tag" class="modal hidden">
+    <div class="modal-box">
+      <span class="modal-picker-label">FOOD TYPE</span>
+      <div class="meal-grid" id="food-tag-grid"></div>
+    </div>
+  </div>
+
+  <!-- EDIT PAST FOOD -->
+  <div id="modal-edit-food" class="modal hidden">
+    <div class="modal-box">
+      <span class="modal-picker-label">EDIT FOOD</span>
+      <div class="food-edit-fields">
+        <input type="text" id="food-edit-name" class="text-input" placeholder="Food name" />
+        <div class="add-food-row">
+          <input type="number" id="food-edit-cal" class="text-input small" placeholder="kcal" />
+          <input type="number" id="food-edit-protein" class="text-input small" placeholder="protein g" />
+        </div>
+      </div>
+      <span class="modal-picker-label">FOOD TYPE</span>
+      <div class="meal-grid" id="food-edit-tag-grid"></div>
+      <button type="button" class="delete-food-library-btn" id="food-edit-delete">DELETE FOOD</button>
     </div>
   </div>
 

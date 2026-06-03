@@ -458,8 +458,22 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   padding: 14px 20px;
   border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.food-item:active { background: #111; }
+.food-item.selected {
+  background: #111;
+  border-bottom-color: #333;
+}
+.food-item.deselected {
+  opacity: 0.4;
+}
+.food-item.deselected .food-macros {
+  text-decoration: line-through;
 }
 .food-name {
   font-size: 13px;
@@ -472,28 +486,205 @@ html, body {
   letter-spacing: 0.05em;
   text-align: right;
 }
-.delete-btn {
+.food-portions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.portion-btn {
   background: none;
-  border: none;
-  color: #444;
-  font-size: 18px;
+  border: 1px solid var(--line);
+  color: var(--white);
+  font-family: var(--font-display);
+  font-size: 22px;
+  width: 36px;
+  height: 36px;
   cursor: pointer;
-  padding: 0 0 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  border-radius: 0;
+}
+.portion-btn:active {
+  border-color: var(--white);
+  background: #1a1a1a;
+}
+.portion-count {
+  font-family: var(--font-display);
+  font-size: 28px;
+  min-width: 24px;
+  text-align: center;
   line-height: 1;
 }
-.delete-btn:active { color: var(--white); }
+.delete-food-library-btn {
+  background: none;
+  border: 1px solid #442222;
+  color: #ff4444;
+  font-family: var(--font-body);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  padding: 14px;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 8px;
+  border-radius: 0;
+}
+.delete-food-library-btn:active {
+  border-color: #ff4444;
+  background: #1a0a0a;
+}
 
-.add-food-block {
-  padding: 12px 20px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.cal-bottom {
   border-top: 1px solid var(--line);
   flex-shrink: 0;
 }
+.cal-action-split {
+  display: flex;
+  align-items: stretch;
+}
+.cal-action-split.hidden {
+  display: none;
+}
+.cal-action-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--mid);
+  font-family: var(--font-body);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  padding: 20px 10px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  border-radius: 0;
+}
+.cal-action-btn:active {
+  color: var(--white);
+  background: #111;
+}
+.add-food-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px 20px;
+}
+.add-food-panel.hidden { display: none; }
 .add-food-row {
   display: flex;
   gap: 8px;
+}
+.past-food-categories.hidden { display: none; }
+.past-food-categories {
+  padding: 12px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cal-panel-back {
+  background: none;
+  border: none;
+  color: var(--mid);
+  font-family: var(--font-body);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+.cal-panel-back:active { color: var(--white); }
+.meal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 8px;
+}
+.meal-grid-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--white);
+  font-family: var(--font-body);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  padding: 14px 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+  border-radius: 0;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.meal-grid-btn:active,
+.meal-grid-btn.selected {
+  border-color: var(--white);
+  background: #111;
+}
+.past-food-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.past-food-header.hidden { display: none; }
+.past-food-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 0.1em;
+}
+.food-item.tappable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.food-item.tappable:active { background: #111; }
+.food-item-hint {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: #444;
+}
+.food-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.edit-food-btn {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--mid);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 8px 10px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s;
+  border-radius: 0;
+}
+.edit-food-btn:active {
+  color: var(--white);
+  border-color: var(--white);
+}
+.food-item-main {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.food-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.modal-picker-label {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--mid);
 }
 
 /* scrollbar */

@@ -11,10 +11,20 @@ const state = {
   data: defaultData()
 };
 
+const FOOD_TAGS = [
+  { id: 'breakfast', label: 'BREAKFAST' },
+  { id: 'lunch', label: 'LUNCH' },
+  { id: 'dinner', label: 'DINNER' },
+  { id: 'snacks', label: 'SNACKS' },
+  { id: 'desserts', label: 'DESSERTS' },
+  { id: 'ingredients', label: 'INGREDIENTS' }
+];
+
 function defaultData() {
   return {
     workouts: { push: [], pull: [], legs: [] },
-    foods: []
+    foods: [],
+    foodLibrary: []
   };
 }
 
@@ -143,6 +153,39 @@ async function loadFoodsFromCloud() {
   }
 }
 
+async function syncFoodLibraryToCloud() {
+  if (!state.user) return;
+  const { error } = await sb.from('food_library').upsert({
+    user_id: state.user.id,
+    items: state.data.foodLibrary,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id' });
+
+  if (error) { showSync('⚠', true); console.error(error); }
+  else showSync('✓');
+}
+
+async function loadFoodLibraryFromCloud() {
+  if (!state.user) return;
+  const { data, error } = await sb.from('food_library')
+    .select('items')
+    .eq('user_id', state.user.id)
+    .single();
+
+  if (error && error.code !== 'PGRST116') { console.error(error); return; }
+  if (data?.items) {
+    state.data.foodLibrary = data.items;
+    saveLocal();
+  }
+}
+
+function ensureFoodLibrary() {
+  if (!Array.isArray(state.data.foodLibrary)) state.data.foodLibrary = [];
+  state.data.foodLibrary.forEach(f => {
+    if (!f.id) f.id = generateId();
+  });
+}
+
 // ── AUTH ────────────────────────────────────────────────
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
@@ -156,10 +199,13 @@ async function init() {
 async function onLogin() {
   // Load local first for instant feel, then sync from cloud
   state.data = loadLocal();
+  ensureFoodLibrary();
   renderExercises();
   showScreen('home');
   await loadGymFromCloud();
   await loadFoodsFromCloud();
+  await loadFoodLibraryFromCloud();
+  ensureFoodLibrary();
   renderExercises();
 }
 
@@ -207,13 +253,18 @@ function showScreen(id) {
 // ── HOME ───────────────────────────────────────────────
 document.getElementById('btn-gym').addEventListener('click', () => showScreen('gym'));
 document.getElementById('btn-calories').addEventListener('click', () => {
+  resetCalView();
   renderFoods();
   showScreen('calories');
 });
 
 // ── BACK BUTTONS ───────────────────────────────────────
 document.querySelectorAll('.back-btn').forEach(btn => {
-  btn.addEventListener('click', () => showScreen(btn.dataset.target));
+  btn.addEventListener('click', () => {
+    const leavingCalories = document.getElementById('screen-calories').classList.contains('active');
+    if (leavingCalories && btn.dataset.target === 'home') purgeInactiveFoods();
+    showScreen(btn.dataset.target);
+  });
 });
 
 // ── GYM SECTIONS ───────────────────────────────────────
@@ -414,51 +465,351 @@ function closeModal() {
 }
 
 // ── CALORIES ───────────────────────────────────────────
+const calView = { mode: 'today', pastTag: null };
+
+function tagLabel(tagId) {
+  return FOOD_TAGS.find(t => t.id === tagId)?.label || tagId.toUpperCase();
+}
+
+function normalizeTodayFood(f) {
+  if (f.selected === undefined) f.selected = true;
+  if (!f.portions) f.portions = 1;
+}
+
+function foodEntryTotals(f) {
+  if (f.selected === false) return { cal: 0, protein: 0 };
+  const p = f.portions || 1;
+  return { cal: f.cal * p, protein: f.protein * p };
+}
+
+function purgeInactiveFoods() {
+  const before = state.data.foods.length;
+  state.data.foods = state.data.foods.filter(f => f.selected !== false);
+  if (state.data.foods.length !== before) {
+    saveLocal();
+    syncFoodsToCloud();
+  }
+}
+
+function resetCalView() {
+  calView.mode = 'today';
+  calView.pastTag = null;
+  document.getElementById('past-food-header').classList.add('hidden');
+  document.getElementById('cal-action-split').classList.remove('hidden');
+  document.getElementById('add-food-panel').classList.add('hidden');
+  document.getElementById('past-food-categories').classList.add('hidden');
+  document.getElementById('btn-add-food-mode').classList.remove('active');
+  document.getElementById('btn-past-food-mode').classList.remove('active');
+  renderFoods();
+}
+
+function showAddFoodPanel() {
+  document.getElementById('cal-action-split').classList.add('hidden');
+  document.getElementById('past-food-categories').classList.add('hidden');
+  document.getElementById('add-food-panel').classList.remove('hidden');
+  document.getElementById('btn-add-food-mode').classList.remove('active');
+  document.getElementById('btn-past-food-mode').classList.remove('active');
+  calView.mode = 'today';
+  calView.pastTag = null;
+  document.getElementById('past-food-header').classList.add('hidden');
+  renderFoods();
+}
+
+function showPastFoodCategories() {
+  document.getElementById('cal-action-split').classList.add('hidden');
+  document.getElementById('add-food-panel').classList.add('hidden');
+  document.getElementById('past-food-categories').classList.remove('hidden');
+  document.getElementById('btn-past-food-mode').classList.remove('active');
+  document.getElementById('btn-add-food-mode').classList.remove('active');
+  calView.mode = 'past-categories';
+  calView.pastTag = null;
+  document.getElementById('past-food-header').classList.add('hidden');
+  renderFoods();
+}
+
+function showPastFoodList(tagId) {
+  calView.mode = 'past-list';
+  calView.pastTag = tagId;
+  document.getElementById('cal-action-split').classList.add('hidden');
+  document.getElementById('add-food-panel').classList.add('hidden');
+  document.getElementById('past-food-categories').classList.add('hidden');
+  document.getElementById('past-food-header').classList.remove('hidden');
+  document.getElementById('past-food-title').textContent = tagLabel(tagId);
+  renderFoods();
+}
+
+function buildMealGrid(container, onSelect) {
+  container.innerHTML = '';
+  FOOD_TAGS.forEach(tag => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'meal-grid-btn';
+    btn.textContent = tag.label;
+    btn.addEventListener('click', () => onSelect(tag.id));
+    container.appendChild(btn);
+  });
+}
+
 function renderFoods() {
+  ensureFoodLibrary();
   const list = document.getElementById('food-list');
   list.innerHTML = '';
   let totalCal = 0, totalProtein = 0;
 
-  state.data.foods.forEach((f, i) => {
-    totalCal += f.cal;
-    totalProtein += f.protein;
-    const item = document.createElement('div');
-    item.className = 'food-item';
-    item.innerHTML = `
-      <span class="food-name">${f.name}</span>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <div class="food-macros">${f.cal} kcal<br>${f.protein}g protein</div>
-        <button class="delete-btn" data-index="${i}">×</button>
-      </div>
-    `;
-    list.appendChild(item);
-  });
+  if (calView.mode === 'past-list') {
+    const items = state.data.foodLibrary.filter(f => f.tag === calView.pastTag);
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'food-item';
+      empty.innerHTML = '<span class="food-name" style="color:var(--mid);">No saved foods</span>';
+      list.appendChild(empty);
+    } else {
+      items.forEach((f) => {
+        const item = document.createElement('div');
+        item.className = 'food-item';
+        item.innerHTML = `
+          <div class="food-item-main">
+            <span class="food-name">${f.name}</span>
+            <span class="food-item-hint">TAP TO LOG TODAY</span>
+          </div>
+          <div class="food-item-actions">
+            <div class="food-macros">${f.cal} kcal · ${f.protein}g</div>
+            <button type="button" class="edit-food-btn" data-id="${f.id}" title="Edit">✎</button>
+          </div>
+        `;
+        item.querySelector('.food-item-main').addEventListener('click', () => {
+          state.data.foods.push({
+            name: f.name,
+            cal: f.cal,
+            protein: f.protein,
+            portions: 1,
+            selected: true
+          });
+          saveLocal();
+          syncFoodsToCloud();
+          resetCalView();
+          renderFoods();
+        });
+        item.querySelector('.edit-food-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          openEditFoodModal(f.id);
+        });
+        list.appendChild(item);
+      });
+    }
+    state.data.foods.forEach(f => {
+      normalizeTodayFood(f);
+      const t = foodEntryTotals(f);
+      totalCal += t.cal;
+      totalProtein += t.protein;
+    });
+  } else {
+    state.data.foods.forEach((f, i) => {
+      normalizeTodayFood(f);
+      const t = foodEntryTotals(f);
+      totalCal += t.cal;
+      totalProtein += t.protein;
+
+      const isSelected = f.selected !== false;
+      const portions = f.portions || 1;
+      const displayCal = isSelected ? f.cal * portions : f.cal;
+      const displayProtein = isSelected ? f.protein * portions : f.protein;
+
+      const item = document.createElement('div');
+      item.className = 'food-item ' + (isSelected ? 'selected' : 'deselected');
+      item.innerHTML = `
+        <span class="food-name">${f.name}</span>
+        ${isSelected ? `
+          <div class="food-portions">
+            <button type="button" class="portion-btn" data-action="minus">−</button>
+            <span class="portion-count">${portions}</span>
+            <button type="button" class="portion-btn" data-action="plus">+</button>
+          </div>
+        ` : '<div class="food-portions" aria-hidden="true"></div>'}
+        <div class="food-macros">${displayCal} kcal<br>${displayProtein}g protein</div>
+      `;
+
+      item.addEventListener('click', () => {
+        f.selected = f.selected === false;
+        if (f.selected !== false) f.portions = f.portions || 1;
+        saveLocal();
+        syncFoodsToCloud();
+        renderFoods();
+      });
+
+      if (isSelected) {
+        item.querySelector('[data-action="minus"]').addEventListener('click', (e) => {
+          e.stopPropagation();
+          f.portions = Math.max(1, (f.portions || 1) - 1);
+          saveLocal();
+          syncFoodsToCloud();
+          renderFoods();
+        });
+        item.querySelector('[data-action="plus"]').addEventListener('click', (e) => {
+          e.stopPropagation();
+          f.portions = (f.portions || 1) + 1;
+          saveLocal();
+          syncFoodsToCloud();
+          renderFoods();
+        });
+      }
+
+      list.appendChild(item);
+    });
+  }
 
   document.getElementById('total-cal').textContent = totalCal;
   document.getElementById('total-protein').textContent = totalProtein;
+}
 
-  list.querySelectorAll('.delete-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.data.foods.splice(parseInt(btn.dataset.index), 1);
-      saveLocal();
-      syncFoodsToCloud();
-      renderFoods();
-    });
+function openFoodTagModal(onSelect) {
+  const modal = document.getElementById('modal-food-tag');
+  modal.classList.remove('hidden');
+  const grid = document.getElementById('food-tag-grid');
+  buildMealGrid(grid, (tagId) => {
+    modal.classList.add('hidden');
+    onSelect(tagId);
   });
 }
 
-document.getElementById('add-food-btn').addEventListener('click', () => {
+function closeFoodTagModal() {
+  document.getElementById('modal-food-tag').classList.add('hidden');
+}
+
+let editingFoodId = null;
+let editingFoodTag = null;
+
+function openEditFoodModal(foodId) {
+  ensureFoodLibrary();
+  const food = state.data.foodLibrary.find(f => f.id === foodId);
+  if (!food) return;
+
+  editingFoodId = foodId;
+  editingFoodTag = food.tag;
+
+  document.getElementById('food-edit-name').value = food.name;
+  document.getElementById('food-edit-cal').value = food.cal || '';
+  document.getElementById('food-edit-protein').value = food.protein || '';
+
+  const grid = document.getElementById('food-edit-tag-grid');
+  grid.innerHTML = '';
+  FOOD_TAGS.forEach(tag => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'meal-grid-btn' + (tag.id === editingFoodTag ? ' selected' : '');
+    btn.textContent = tag.label;
+    btn.addEventListener('click', () => {
+      editingFoodTag = tag.id;
+      grid.querySelectorAll('.meal-grid-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      autoSaveEditedFood();
+    });
+    grid.appendChild(btn);
+  });
+
+  document.getElementById('modal-edit-food').classList.remove('hidden');
+}
+
+function closeEditFoodModal(skipSave = false) {
+  if (!skipSave) autoSaveEditedFood();
+  document.getElementById('modal-edit-food').classList.add('hidden');
+  editingFoodId = null;
+  editingFoodTag = null;
+}
+
+function deleteEditedFood() {
+  if (!editingFoodId) return;
+  state.data.foodLibrary = state.data.foodLibrary.filter(f => f.id !== editingFoodId);
+  editingFoodId = null;
+  editingFoodTag = null;
+  saveLocal();
+  syncFoodLibraryToCloud();
+  document.getElementById('modal-edit-food').classList.add('hidden');
+  if (calView.mode === 'past-list') renderFoods();
+}
+
+let foodEditSyncDebounce = null;
+
+function autoSaveEditedFood() {
+  if (!editingFoodId || !editingFoodTag) return;
+
+  const food = state.data.foodLibrary.find(f => f.id === editingFoodId);
+  if (!food) return;
+
+  const nameInput = document.getElementById('food-edit-name').value.trim();
+  const cal = parseInt(document.getElementById('food-edit-cal').value) || 0;
+  const protein = parseInt(document.getElementById('food-edit-protein').value) || 0;
+  const prevTag = food.tag;
+
+  if (nameInput) food.name = nameInput;
+  food.cal = cal;
+  food.protein = protein;
+  food.tag = editingFoodTag;
+
+  saveLocal();
+  clearTimeout(foodEditSyncDebounce);
+  foodEditSyncDebounce = setTimeout(() => syncFoodLibraryToCloud(), 800);
+
+  if (calView.mode === 'past-list' && calView.pastTag === prevTag && prevTag !== editingFoodTag) {
+    showPastFoodList(calView.pastTag);
+  } else if (calView.mode === 'past-list') {
+    renderFoods();
+  }
+}
+
+function addFoodWithTag(tagId) {
   const name = document.getElementById('food-name-input').value.trim();
   const cal = parseInt(document.getElementById('food-cal-input').value) || 0;
   const protein = parseInt(document.getElementById('food-protein-input').value) || 0;
   if (!name) return;
-  state.data.foods.push({ name, cal, protein });
+
+  ensureFoodLibrary();
+  state.data.foodLibrary.push({
+    id: generateId(),
+    name,
+    cal,
+    protein,
+    tag: tagId
+  });
+  state.data.foods.push({ name, cal, protein, portions: 1, selected: true });
   saveLocal();
   syncFoodsToCloud();
+  syncFoodLibraryToCloud();
   document.getElementById('food-name-input').value = '';
   document.getElementById('food-cal-input').value = '';
   document.getElementById('food-protein-input').value = '';
   renderFoods();
+}
+
+document.getElementById('btn-add-food-mode').addEventListener('click', showAddFoodPanel);
+document.getElementById('btn-past-food-mode').addEventListener('click', showPastFoodCategories);
+document.getElementById('add-food-back').addEventListener('click', resetCalView);
+
+document.getElementById('past-food-back').addEventListener('click', () => {
+  if (calView.mode === 'past-list') showPastFoodCategories();
+});
+
+document.getElementById('past-categories-back').addEventListener('click', resetCalView);
+
+buildMealGrid(document.getElementById('meal-category-grid'), showPastFoodList);
+
+document.getElementById('add-food-btn').addEventListener('click', () => {
+  const name = document.getElementById('food-name-input').value.trim();
+  if (!name) return;
+  openFoodTagModal(addFoodWithTag);
+});
+
+document.getElementById('modal-food-tag').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-food-tag')) closeFoodTagModal();
+});
+
+['food-edit-name', 'food-edit-cal', 'food-edit-protein'].forEach(id => {
+  document.getElementById(id).addEventListener('input', autoSaveEditedFood);
+});
+
+document.getElementById('food-edit-delete').addEventListener('click', deleteEditedFood);
+document.getElementById('modal-edit-food').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-edit-food')) closeEditFoodModal();
 });
 
 // ── TIMER ──────────────────────────────────────────────
