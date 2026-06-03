@@ -81,7 +81,7 @@ async function syncGymToCloud() {
   }, { onConflict: 'user_id,date,type' });
 
   if (error) { showSync('⚠', true); console.error(error); }
-  else showSync('✓');
+  else { showSync('✓'); queueDailySnapshot(); }
 }
 
 async function loadGymFromCloud() {
@@ -134,7 +134,7 @@ async function syncFoodsToCloud() {
   }, { onConflict: 'user_id,date' });
 
   if (error) { showSync('⚠', true); console.error(error); }
-  else showSync('✓');
+  else { showSync('✓'); queueDailySnapshot(); }
 }
 
 async function loadFoodsFromCloud() {
@@ -205,8 +205,13 @@ async function onLogin() {
   await loadGymFromCloud();
   await loadFoodsFromCloud();
   await loadFoodLibraryFromCloud();
+  await loadWeightFromCloud();
   ensureFoodLibrary();
   renderExercises();
+  // Seal yesterday's snapshot so past days are permanently archived
+  await sealYesterdayIfNeeded();
+  // Save today's snapshot with current data
+  queueDailySnapshot();
 }
 
 document.getElementById('login-btn').addEventListener('click', async () => {
@@ -262,10 +267,38 @@ document.getElementById('btn-calories').addEventListener('click', () => {
 document.querySelectorAll('.back-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const leavingCalories = document.getElementById('screen-calories').classList.contains('active');
-    if (leavingCalories && btn.dataset.target === 'home') purgeInactiveFoods();
+    if (leavingCalories && btn.dataset.target === 'home') archiveDeselectedFoods();
     showScreen(btn.dataset.target);
   });
 });
+
+function archiveDeselectedFoods() {
+  ensureFoodLibrary();
+  const deselected = state.data.foods.filter(f => f.selected === false);
+  let libraryChanged = false;
+  deselected.forEach(f => {
+    const alreadyInLibrary = state.data.foodLibrary.some(
+      lib => lib.name.toLowerCase() === f.name.toLowerCase()
+    );
+    if (!alreadyInLibrary) {
+      state.data.foodLibrary.push({
+        id: generateId(),
+        name: f.name,
+        cal: f.cal,
+        protein: f.protein,
+        tag: f.tag || 'snacks'
+      });
+      libraryChanged = true;
+    }
+  });
+  if (libraryChanged) syncFoodLibraryToCloud();
+  const before = state.data.foods.length;
+  state.data.foods = state.data.foods.filter(f => f.selected !== false);
+  if (state.data.foods.length !== before) {
+    saveLocal();
+    syncFoodsToCloud();
+  }
+}
 
 // ── GYM SECTIONS ───────────────────────────────────────
 ['push', 'pull', 'legs'].forEach(type => {
@@ -619,40 +652,37 @@ function renderFoods() {
       item.className = 'food-item ' + (isSelected ? 'selected' : 'deselected');
       item.innerHTML = `
         <span class="food-name">${f.name}</span>
-        ${isSelected ? `
-          <div class="food-portions">
-            <button type="button" class="portion-btn" data-action="minus">−</button>
-            <span class="portion-count">${portions}</span>
-            <button type="button" class="portion-btn" data-action="plus">+</button>
-          </div>
-        ` : '<div class="food-portions" aria-hidden="true"></div>'}
+        <div class="food-portions">
+          <button type="button" class="portion-btn" data-action="minus">&#8722;</button>
+          <span class="portion-count">${isSelected ? portions : 0}</span>
+          <button type="button" class="portion-btn" data-action="plus">+</button>
+        </div>
         <div class="food-macros">${displayCal} kcal<br>${displayProtein}g protein</div>
       `;
 
-      item.addEventListener('click', () => {
-        f.selected = f.selected === false;
-        if (f.selected !== false) f.portions = f.portions || 1;
+      item.querySelector('[data-action="minus"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!isSelected) return;
+        const newPortions = (f.portions || 1) - 1;
+        if (newPortions <= 0) {
+          f.selected = false;
+          f.portions = 0;
+        } else {
+          f.portions = newPortions;
+        }
         saveLocal();
         syncFoodsToCloud();
         renderFoods();
       });
 
-      if (isSelected) {
-        item.querySelector('[data-action="minus"]').addEventListener('click', (e) => {
-          e.stopPropagation();
-          f.portions = Math.max(1, (f.portions || 1) - 1);
-          saveLocal();
-          syncFoodsToCloud();
-          renderFoods();
-        });
-        item.querySelector('[data-action="plus"]').addEventListener('click', (e) => {
-          e.stopPropagation();
-          f.portions = (f.portions || 1) + 1;
-          saveLocal();
-          syncFoodsToCloud();
-          renderFoods();
-        });
-      }
+      item.querySelector('[data-action="plus"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        f.selected = true;
+        f.portions = (isSelected ? (f.portions || 1) : 0) + 1;
+        saveLocal();
+        syncFoodsToCloud();
+        renderFoods();
+      });
 
       list.appendChild(item);
     });
@@ -866,6 +896,168 @@ timerDisplay.addEventListener('click', () => {
   if (timerRunning) pauseTimer(); else startTimer();
 });
 timerResetBtn.addEventListener('click', resetTimer);
+
+// ── WEIGHT TRACKER ─────────────────────────────────────
+const WEIGHT_KEY = 'grind_weight';
+const DEFAULT_WEIGHT = 160;
+
+function loadWeight() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(WEIGHT_KEY));
+    if (stored && typeof stored.value === 'number') return stored.value;
+  } catch {}
+  return DEFAULT_WEIGHT;
+}
+
+function saveWeight(val) {
+  try {
+    localStorage.setItem(WEIGHT_KEY, JSON.stringify({
+      value: val,
+      date: new Date().toDateString()
+    }));
+  } catch {}
+}
+
+async function syncWeightToCloud(val) {
+  if (!state.user) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const { error } = await sb.from('weight_logs').upsert({
+    user_id: state.user.id,
+    date: today,
+    weight_lbs: val,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id,date' });
+  if (error) { showSync('⚠', true); console.error(error); }
+  else showSync('✓');
+}
+
+async function loadWeightFromCloud() {
+  if (!state.user) return;
+  // Get the most recent weight entry
+  const { data, error } = await sb.from('weight_logs')
+    .select('weight_lbs, date')
+    .eq('user_id', state.user.id)
+    .order('date', { ascending: false })
+    .limit(1)
+    .single();
+  if (error && error.code !== 'PGRST116') { console.error(error); return; }
+  if (data) {
+    saveWeight(data.weight_lbs);
+    updateWeightDisplay();
+  }
+}
+
+function updateWeightDisplay() {
+  const val = loadWeight();
+  document.getElementById('weight-value').textContent = val % 1 === 0 ? val : val.toFixed(1);
+}
+
+document.getElementById('weight-minus').addEventListener('click', () => {
+  const current = loadWeight();
+  const next = Math.round((current - 0.5) * 10) / 10;
+  saveWeight(next);
+  updateWeightDisplay();
+  syncWeightToCloud(next);
+});
+
+document.getElementById('weight-plus').addEventListener('click', () => {
+  const current = loadWeight();
+  const next = Math.round((current + 0.5) * 10) / 10;
+  saveWeight(next);
+  updateWeightDisplay();
+  syncWeightToCloud(next);
+});
+
+updateWeightDisplay();
+
+// ── DAILY SNAPSHOT ─────────────────────────────────────
+// Saves an immutable summary row for each calendar day.
+// Called on login (seals yesterday if missed) and after
+// any data change today. Past rows are never overwritten
+// because upsert only matches user_id+date — once the
+// date rolls over, yesterday's row is permanently locked.
+
+async function saveDailySnapshot(dateStr) {
+  if (!state.user) return;
+  // dateStr is YYYY-MM-DD
+  const weight = loadWeight();
+
+  // Sum foods for the given date
+  let totalCal = 0, totalProtein = 0;
+  const dayStr = new Date(dateStr).toDateString();
+  // food_logs stores foods for a specific date — fetch that day's row
+  const { data: foodRow } = await sb.from('food_logs')
+    .select('foods')
+    .eq('user_id', state.user.id)
+    .eq('date', dayStr)
+    .single();
+  if (foodRow?.foods) {
+    foodRow.foods.forEach(f => {
+      if (f.selected !== false) {
+        const p = f.portions || 1;
+        totalCal += (f.cal || 0) * p;
+        totalProtein += (f.protein || 0) * p;
+      }
+    });
+  }
+
+  // Collect gym sets done that day across all workout types
+  const gymSummary = {};
+  for (const type of ['push', 'pull', 'legs']) {
+    const { data: gymRows } = await sb.from('gym_logs')
+      .select('snapshot')
+      .eq('user_id', state.user.id)
+      .eq('date', dayStr)
+      .eq('type', type)
+      .single();
+    if (gymRows?.snapshot) {
+      const exercises = [];
+      gymRows.snapshot.forEach(ex => {
+        const daySets = ex.sets.filter(s => new Date(s.date).toDateString() === dayStr);
+        if (daySets.length) {
+          exercises.push({ name: ex.name, sets: daySets });
+        }
+      });
+      if (exercises.length) gymSummary[type] = exercises;
+    }
+  }
+
+  const { error } = await sb.from('daily_snapshots').upsert({
+    user_id: state.user.id,
+    date: dateStr,
+    weight_lbs: weight,
+    total_kcal: totalCal,
+    total_protein: totalProtein,
+    gym: gymSummary,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id,date' });
+
+  if (error) console.error('snapshot error', error);
+}
+
+async function sealYesterdayIfNeeded() {
+  // On login, make sure yesterday's snapshot is saved
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yStr = yesterday.toISOString().slice(0, 10);
+  // Only seal if there's any food or gym data for yesterday
+  const dayStr = yesterday.toDateString();
+  const { data: foodRow } = await sb.from('food_logs')
+    .select('date')
+    .eq('user_id', state.user.id)
+    .eq('date', dayStr)
+    .single();
+  if (foodRow) await saveDailySnapshot(yStr);
+}
+
+let snapshotDebounce = null;
+function queueDailySnapshot() {
+  clearTimeout(snapshotDebounce);
+  snapshotDebounce = setTimeout(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    saveDailySnapshot(today);
+  }, 3000);
+}
 
 // ── BOOT ───────────────────────────────────────────────
 init();

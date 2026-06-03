@@ -479,18 +479,24 @@ html, body {
   font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  flex: 1;
+  min-width: 0;
 }
 .food-macros {
   font-size: 11px;
   color: var(--mid);
   letter-spacing: 0.05em;
   text-align: right;
+  flex-shrink: 0;
+  width: 80px;
 }
 .food-portions {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  width: 120px;
+  justify-content: center;
 }
 .portion-btn {
   background: none;
@@ -687,7 +693,56 @@ html, body {
   color: var(--mid);
 }
 
-/* scrollbar */
+/* ── WEIGHT WIDGET ── */
+.weight-widget {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.weight-btn {
+  background: none;
+  border: none;
+  color: var(--mid);
+  font-family: var(--font-display);
+  font-size: 22px;
+  width: 36px;
+  height: 44px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.weight-btn:active { color: var(--white); }
+.weight-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 52px;
+}
+.weight-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+#weight-value {
+  font-family: var(--font-display);
+  font-size: 28px;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  color: var(--white);
+}
+.weight-unit-inline {
+  font-family: var(--font-body);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--mid);
+}
 ::-webkit-scrollbar { width: 2px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--line); }
