@@ -14,6 +14,7 @@ function loadData() {
 function defaultData() {
   return {
     workouts: { push: [], pull: [], legs: [] },
+    dailyLog: [], // [ { date, type: 'push'|'pull'|'legs', snapshot: [...exercises] } ]
     foods: []
   };
 }
@@ -29,6 +30,43 @@ function save() {
 function findExercise() {
   return state.data.workouts[state.currentWorkout]
     .find(e => e.id === state.currentExerciseId);
+}
+
+// Save a daily snapshot whenever workout data changes for today
+function saveDailyLog() {
+  if (!state.currentWorkout) return;
+  const today = new Date().toDateString();
+  const exercises = state.data.workouts[state.currentWorkout];
+
+  // Only snapshot exercises that have a set logged today
+  const todayExercises = exercises
+    .map(ex => {
+      const todaySets = ex.sets.filter(s => new Date(s.date).toDateString() === today);
+      if (!todaySets.length) return null;
+      return { id: ex.id, name: ex.name, sets: todaySets };
+    })
+    .filter(Boolean);
+
+  if (!todayExercises.length) return;
+
+  if (!state.data.dailyLog) state.data.dailyLog = [];
+
+  const existing = state.data.dailyLog.find(
+    d => d.date === today && d.type === state.currentWorkout
+  );
+  if (existing) {
+    existing.snapshot = todayExercises;
+    existing.updatedAt = new Date().toISOString();
+  } else {
+    state.data.dailyLog.push({
+      date: today,
+      type: state.currentWorkout,
+      snapshot: todayExercises,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+  }
+  save();
 }
 
 // ── NAVIGATION ─────────────────────────────────────────
@@ -199,6 +237,7 @@ function autoSaveSets() {
     ex.sets.push({ sets, date: new Date().toISOString() });
   }
   save();
+  saveDailyLog();
   renderExercises();
   renderModalHistory(ex);
 }
@@ -285,3 +324,60 @@ document.getElementById('add-food-btn').addEventListener('click', () => {
   document.getElementById('food-protein-input').value = '';
   renderFoods();
 });
+
+// ── TIMER ──────────────────────────────────────────────
+const TIMER_DURATION = 120;
+let timerSeconds = TIMER_DURATION;
+let timerRunning = false;
+let timerInterval = null;
+
+const timerDisplay = document.getElementById('timer-display');
+const timerResetBtn = document.getElementById('timer-reset');
+
+function formatTime(s) {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+function updateTimerDisplay() {
+  timerDisplay.textContent = formatTime(timerSeconds);
+  timerDisplay.classList.toggle('urgent', timerSeconds <= 10 && timerSeconds > 0 && timerRunning);
+  timerDisplay.classList.toggle('running', timerRunning);
+}
+
+function startTimer() {
+  if (timerRunning) return;
+  timerRunning = true;
+  timerInterval = setInterval(() => {
+    if (timerSeconds <= 0) {
+      clearInterval(timerInterval);
+      timerRunning = false;
+      updateTimerDisplay();
+      return;
+    }
+    timerSeconds--;
+    updateTimerDisplay();
+  }, 1000);
+  updateTimerDisplay();
+}
+
+function pauseTimer() {
+  clearInterval(timerInterval);
+  timerRunning = false;
+  updateTimerDisplay();
+}
+
+function resetTimer() {
+  clearInterval(timerInterval);
+  timerRunning = false;
+  timerSeconds = TIMER_DURATION;
+  updateTimerDisplay();
+}
+
+timerDisplay.addEventListener('click', () => {
+  if (timerRunning) pauseTimer(); else startTimer();
+});
+timerResetBtn.addEventListener('click', resetTimer);
+
+// Don't auto-start — remove old auto-start listeners by not re-adding them
