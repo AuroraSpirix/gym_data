@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>GRIND</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- HOME SCREEN -->
+  <div id="screen-home" class="screen active">
+    <div class="home-half" id="btn-gym">
+      <div class="home-label">
+        <span class="home-label-sub">TRACK YOUR</span>
+        <span class="home-label-main">GYM</span>
+      </div>
+    </div>
+    <div class="divider-h"></div>
+    <div class="home-half" id="btn-calories">
+      <div class="home-label">
+        <span class="home-label-sub">TRACK YOUR</span>
+        <span class="home-label-main">CALORIES</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- GYM SCREEN -->
+  <div id="screen-gym" class="screen">
+    <div class="top-bar">
+      <button class="back-btn" data-target="home">←</button>
+      <span class="top-bar-title">GYM</span>
+    </div>
+    <div class="gym-split">
+      <div class="gym-section" id="btn-push">
+        <span class="gym-section-label">PUSH</span>
+      </div>
+      <div class="divider-h"></div>
+      <div class="gym-section" id="btn-pull">
+        <span class="gym-section-label">PULL</span>
+      </div>
+      <div class="divider-h"></div>
+      <div class="gym-section" id="btn-legs">
+        <span class="gym-section-label">LEGS</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- WORKOUT SCREEN (Push/Pull/Legs detail) -->
+  <div id="screen-workout" class="screen">
+    <div class="top-bar">
+      <button class="back-btn" data-target="gym">←</button>
+      <span class="top-bar-title" id="workout-title">PUSH</span>
+    </div>
+    <div class="workout-body">
+      <div id="exercise-list" class="exercise-list"></div>
+      <div class="add-exercise-row">
+        <input type="text" id="exercise-name-input" class="text-input" placeholder="Exercise name" />
+        <button class="icon-btn" id="add-exercise-btn">+</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOG SET MODAL -->
+  <div id="modal-set" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-title-row">
+        <span class="modal-title" id="modal-exercise-name" contenteditable="false" spellcheck="false"></span>
+        <button id="modal-notes-btn" class="notes-btn" title="Notes">≡</button>
+      </div>
+      <div id="modal-notes-panel" class="notes-panel hidden">
+        <textarea id="modal-notes-text" class="notes-textarea" placeholder="Add notes…"></textarea>
+      </div>
+      <div class="rep-logger">
+        <div class="rep-logger-header">
+          <span class="rep-col-label">SET</span>
+          <span class="rep-col-label">WEIGHT (kg)</span>
+          <span class="rep-col-label">REPS</span>
+        </div>
+        <div id="rep-rows"></div>
+      </div>
+      <div class="modal-history" id="modal-history"></div>
+    </div>
+  </div>
+
+  <!-- CALORIES SCREEN -->
+  <div id="screen-calories" class="screen">
+    <div class="top-bar">
+      <button class="back-btn" data-target="home">←</button>
+      <span class="top-bar-title">CALORIES</span>
+    </div>
+    <div class="cal-body">
+      <div class="cal-totals">
+        <div class="cal-total-item">
+          <span class="cal-total-num" id="total-cal">0</span>
+          <span class="cal-total-label">KCAL</span>
+        </div>
+        <div class="cal-divider"></div>
+        <div class="cal-total-item">
+          <span class="cal-total-num" id="total-protein">0</span>
+          <span class="cal-total-label">PROTEIN (g)</span>
+        </div>
+      </div>
+      <div id="food-list" class="food-list"></div>
+      <div class="add-food-block">
+        <input type="text" id="food-name-input" class="text-input" placeholder="Food name" />
+        <div class="add-food-row">
+          <input type="number" id="food-cal-input" class="text-input small" placeholder="kcal" />
+          <input type="number" id="food-protein-input" class="text-input small" placeholder="protein g" />
+          <button class="icon-btn" id="add-food-btn">+</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
