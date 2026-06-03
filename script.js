@@ -847,6 +847,8 @@ const TIMER_DURATION = 120;
 let timerSeconds = TIMER_DURATION;
 let timerRunning = false;
 let timerInterval = null;
+let timerStartedAt = null;   // wall-clock ms when timer last started
+let timerSecondsAtStart = TIMER_DURATION; // seconds remaining when started
 
 const timerDisplay = document.getElementById('timer-display');
 const timerResetBtn = document.getElementById('timer-reset');
@@ -858,7 +860,7 @@ function formatTime(s) {
 }
 
 function updateTimerDisplay() {
-  timerDisplay.textContent = formatTime(timerSeconds);
+  timerDisplay.textContent = formatTime(Math.max(0, timerSeconds));
   timerDisplay.classList.toggle('urgent', timerSeconds <= 10 && timerSeconds > 0 && timerRunning);
   timerDisplay.classList.toggle('running', timerRunning);
 }
@@ -866,31 +868,55 @@ function updateTimerDisplay() {
 function startTimer() {
   if (timerRunning) return;
   timerRunning = true;
+  timerStartedAt = Date.now();
+  timerSecondsAtStart = timerSeconds;
   timerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+    timerSeconds = timerSecondsAtStart - elapsed;
     if (timerSeconds <= 0) {
+      timerSeconds = 0;
       clearInterval(timerInterval);
       timerRunning = false;
-      updateTimerDisplay();
-      return;
     }
-    timerSeconds--;
     updateTimerDisplay();
-  }, 1000);
+  }, 500); // poll every 500ms so wakeup correction is fast
   updateTimerDisplay();
 }
 
 function pauseTimer() {
   clearInterval(timerInterval);
   timerRunning = false;
+  // Capture accurate remaining time before pausing
+  if (timerStartedAt) {
+    const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+    timerSeconds = Math.max(0, timerSecondsAtStart - elapsed);
+  }
+  timerStartedAt = null;
   updateTimerDisplay();
 }
 
 function resetTimer() {
   clearInterval(timerInterval);
   timerRunning = false;
+  timerStartedAt = null;
   timerSeconds = TIMER_DURATION;
+  timerSecondsAtStart = TIMER_DURATION;
   updateTimerDisplay();
 }
+
+// When app comes back into focus, recalculate elapsed time
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && timerRunning && timerStartedAt) {
+    const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+    timerSeconds = Math.max(0, timerSecondsAtStart - elapsed);
+    if (timerSeconds <= 0) {
+      timerSeconds = 0;
+      clearInterval(timerInterval);
+      timerRunning = false;
+    }
+    updateTimerDisplay();
+  }
+});
 
 timerDisplay.addEventListener('click', () => {
   if (timerRunning) pauseTimer(); else startTimer();
