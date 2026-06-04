@@ -317,18 +317,10 @@ function renderExercises() {
   const exercises = state.data.workouts[state.currentWorkout];
   list.innerHTML = '';
   exercises.forEach((ex) => {
-    const lastSession = ex.sets[ex.sets.length - 1];
-    let meta = 'No sets logged';
-    if (lastSession) {
-      meta = lastSession.sets.map(s => `${s.weight}kg×${s.reps}`).join('  ');
-    }
     const item = document.createElement('div');
     item.className = 'exercise-item';
     item.innerHTML = `
-      <div>
-        <div class="exercise-name">${ex.name}</div>
-        <div class="exercise-meta">${meta} · ${ex.sets.length} sessions</div>
-      </div>
+      <div class="exercise-name">${ex.name}</div>
       <span style="color:#444;font-size:18px;">›</span>
     `;
     item.addEventListener('click', () => openSetModal(ex.id));
@@ -340,7 +332,7 @@ document.getElementById('add-exercise-btn').addEventListener('click', () => {
   const input = document.getElementById('exercise-name-input');
   const name = input.value.trim();
   if (!name) return;
-  state.data.workouts[state.currentWorkout].push({ id: generateId(), name, sets: [], notes: '' });
+  state.data.workouts[state.currentWorkout].push({ id: generateId(), name, sets: [], notes: '', repMin: null, repMax: null });
   saveLocal();
   syncGymToCloud();
   input.value = '';
@@ -356,6 +348,9 @@ function openSetModal(exerciseId) {
   const ex = findExercise();
   titleEl.contentEditable = 'false';
   titleEl.textContent = ex.name;
+
+  // Show rep range
+  renderRepRange(ex);
 
   const notesPanel = document.getElementById('modal-notes-panel');
   const notesText = document.getElementById('modal-notes-text');
@@ -378,39 +373,81 @@ function openSetModal(exerciseId) {
   document.getElementById('modal-set').classList.remove('hidden');
 }
 
+function renderRepRange(ex) {
+  const rangeEl = document.getElementById('rep-range-display');
+  if (ex.repMin != null || ex.repMax != null) {
+    const min = ex.repMin ?? '?';
+    const max = ex.repMax ?? '?';
+    rangeEl.textContent = `${min}–${max} reps`;
+    rangeEl.classList.remove('hidden');
+  } else {
+    rangeEl.textContent = '';
+    rangeEl.classList.add('hidden');
+  }
+}
+
 // ── INLINE LONG-PRESS RENAME ───────────────────────────
 function startLongPress() {
   longPressTimer = setTimeout(() => {
-    titleEl.contentEditable = 'true';
-    titleEl.focus();
-    const range = document.createRange();
-    range.selectNodeContents(titleEl);
-    range.collapse(false);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
+    openExerciseEditPanel();
   }, 500);
 }
 function cancelLongPress() { clearTimeout(longPressTimer); }
 
 titleEl.addEventListener('mousedown', startLongPress);
 titleEl.addEventListener('touchstart', startLongPress, { passive: true });
-titleEl.addEventListener('mouseup', cancelLongPress);
 titleEl.addEventListener('mouseleave', cancelLongPress);
-titleEl.addEventListener('touchend', cancelLongPress);
+titleEl.addEventListener('mouseup', () => { if (!editPanelJustOpened) cancelLongPress(); });
+titleEl.addEventListener('touchend', () => { if (!editPanelJustOpened) cancelLongPress(); });
 
-titleEl.addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
+let editPanelJustOpened = false;
+
+function openExerciseEditPanel() {
+  const ex = findExercise();
+  if (!ex) return;
+  const panel = document.getElementById('exercise-edit-panel');
+  document.getElementById('exercise-edit-name').value = ex.name;
+  document.getElementById('exercise-edit-rep-min').value = ex.repMin ?? '';
+  document.getElementById('exercise-edit-rep-max').value = ex.repMax ?? '';
+  panel.classList.remove('hidden');
+  editPanelJustOpened = true;
+  setTimeout(() => { editPanelJustOpened = false; }, 300);
+  document.getElementById('exercise-edit-name').focus();
+}
+
+function closeExerciseEditPanel() {
+  document.getElementById('exercise-edit-panel').classList.add('hidden');
+}
+
+function saveExerciseEditPanel() {
+  const ex = findExercise();
+  if (!ex) return;
+  const name = document.getElementById('exercise-edit-name').value.trim();
+  const minVal = document.getElementById('exercise-edit-rep-min').value;
+  const maxVal = document.getElementById('exercise-edit-rep-max').value;
+  if (name) ex.name = name;
+  ex.repMin = minVal !== '' ? parseInt(minVal) : null;
+  ex.repMax = maxVal !== '' ? parseInt(maxVal) : null;
+  titleEl.textContent = ex.name;
+  renderRepRange(ex);
+  saveLocal();
+  syncGymToCloud();
+  renderExercises();
+}
+
+['exercise-edit-name', 'exercise-edit-rep-min', 'exercise-edit-rep-max'].forEach(id => {
+  document.getElementById(id).addEventListener('input', saveExerciseEditPanel);
 });
-titleEl.addEventListener('blur', () => {
-  const newName = titleEl.textContent.trim();
-  titleEl.contentEditable = 'false';
-  if (newName) {
-    const ex = findExercise();
-    if (ex) { ex.name = newName; saveLocal(); syncGymToCloud(); renderExercises(); }
-    titleEl.textContent = newName;
-  } else {
-    titleEl.textContent = findExercise()?.name || '';
+
+// Close edit panel when clicking outside the modal box
+document.getElementById('modal-set').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-set')) {
+    closeExerciseEditPanel();
+    closeModal();
+  } else if (!editPanelJustOpened &&
+             !document.getElementById('exercise-edit-panel').contains(e.target) &&
+             !titleEl.contains(e.target)) {
+    closeExerciseEditPanel();
   }
 });
 
@@ -489,9 +526,7 @@ function renderModalHistory(ex) {
   });
 }
 
-document.getElementById('modal-set').addEventListener('click', e => {
-  if (e.target === document.getElementById('modal-set')) closeModal();
-});
+
 
 function closeModal() {
   document.getElementById('modal-set').classList.add('hidden');
@@ -902,6 +937,8 @@ function resetTimer() {
   timerSeconds = TIMER_DURATION;
   timerSecondsAtStart = TIMER_DURATION;
   updateTimerDisplay();
+  // Reset always starts counting down immediately
+  startTimer();
 }
 
 // When app comes back into focus, recalculate elapsed time
@@ -919,7 +956,16 @@ document.addEventListener('visibilitychange', () => {
 });
 
 timerDisplay.addEventListener('click', () => {
-  if (timerRunning) pauseTimer(); else startTimer();
+  if (timerRunning) {
+    pauseTimer();
+  } else if (timerSeconds === 0) {
+    // At 0:00 — restart from full duration and count down
+    timerSeconds = TIMER_DURATION;
+    timerSecondsAtStart = TIMER_DURATION;
+    startTimer();
+  } else {
+    startTimer();
+  }
 });
 timerResetBtn.addEventListener('click', resetTimer);
 

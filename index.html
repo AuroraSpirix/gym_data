@@ -89,7 +89,17 @@
     <div class="modal-box">
       <div class="modal-title-row">
         <span class="modal-title" id="modal-exercise-name" contenteditable="false" spellcheck="false"></span>
+        <span class="rep-range-display hidden" id="rep-range-display"></span>
         <button id="modal-notes-btn" class="notes-btn" title="Notes">≡</button>
+      </div>
+      <div id="exercise-edit-panel" class="exercise-edit-panel hidden">
+        <input type="text" id="exercise-edit-name" class="text-input" placeholder="Exercise name" />
+        <div class="rep-range-edit-row">
+          <input type="number" id="exercise-edit-rep-min" class="text-input small" placeholder="min reps" inputmode="numeric" />
+          <span class="rep-range-dash">–</span>
+          <input type="number" id="exercise-edit-rep-max" class="text-input small" placeholder="max reps" inputmode="numeric" />
+        </div>
+
       </div>
       <div id="modal-notes-panel" class="notes-panel hidden">
         <textarea id="modal-notes-text" class="notes-textarea" placeholder="Add notes…"></textarea>
