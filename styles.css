@@ -970,3 +970,40 @@ input:-webkit-autofill:focus {
   border-color: var(--line) !important;
   transition: background-color 9999s ease-in-out 0s;
 }
+
+/* ── CAL HISTORY DELETE ── */
+.cal-hist-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.cal-hist-delete {
+  background: none;
+  border: none;
+  color: #444;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 6px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.cal-hist-delete:hover, .cal-hist-delete:active { color: #fff; }
+
+/* ── CAL HISTORY WEIGHT + TODAY ── */
+.cal-hist-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cal-hist-weight {
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--mid);
+}
+.cal-hist-weight .cal-hist-label {
+  margin-left: 2px;
+}
+.wh-date-today {
+  color: var(--white);
+  letter-spacing: 0.15em;
+}

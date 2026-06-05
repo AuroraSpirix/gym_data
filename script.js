@@ -209,28 +209,57 @@ function checkDailyFoodReset() {
 // ── CALORIE HISTORY MODAL ──────────────────────────────
 async function openCalHistoryModal() {
   document.getElementById('modal-cal-history').classList.remove('hidden');
+  await renderCalHistory();
+}
+
+async function renderCalHistory() {
   const body = document.getElementById('cal-history-body');
   body.innerHTML = '<div class="wh-empty">Loading…</div>';
   if (!state.user) { body.innerHTML = '<div class="wh-empty">Not logged in</div>'; return; }
+
+  const today = localDateStr();
+
+  // Save today's snapshot first so it appears up to date
+  await saveDailySnapshot(today);
+
   const { data, error } = await sb.from('daily_snapshots')
-    .select('date, total_kcal, total_protein')
+    .select('date, total_kcal, total_protein, weight_lbs')
     .eq('user_id', state.user.id)
     .order('date', { ascending: false })
     .limit(30);
+
   if (error || !data?.length) { body.innerHTML = '<div class="wh-empty">No history yet</div>'; return; }
   body.innerHTML = '';
+
   data.forEach(row => {
-    const label = new Date(row.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const isToday = row.date === today;
+    const label = isToday ? 'TODAY' : new Date(row.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const weightStr = row.weight_lbs ? `${row.weight_lbs}<span class="cal-hist-label">lb</span>` : '';
     const el = document.createElement('div');
     el.className = 'wh-session';
     el.innerHTML = `
-      <div class="wh-date">${label}</div>
+      <div class="cal-hist-header">
+        <div class="wh-date${isToday ? ' wh-date-today' : ''}">${label}</div>
+        <div class="cal-hist-right">
+          ${weightStr ? `<span class="cal-hist-weight">${weightStr}</span>` : ''}
+          ${!isToday ? `<button class="cal-hist-delete" data-date="${row.date}" title="Delete">✕</button>` : ''}
+        </div>
+      </div>
       <div class="cal-hist-row">
         <span class="cal-hist-num">${Math.round(row.total_kcal || 0)}</span><span class="cal-hist-label">kcal</span>
         <span class="cal-hist-sep">·</span>
         <span class="cal-hist-num">${Math.round(row.total_protein || 0)}</span><span class="cal-hist-label">g protein</span>
       </div>
     `;
+    if (!isToday) {
+      el.querySelector('.cal-hist-delete').addEventListener('click', async (e) => {
+        const date = e.currentTarget.dataset.date;
+        e.currentTarget.textContent = '…';
+        e.currentTarget.disabled = true;
+        await sb.from('daily_snapshots').delete().eq('user_id', state.user.id).eq('date', date);
+        await renderCalHistory();
+      });
+    }
     body.appendChild(el);
   });
 }
@@ -404,7 +433,22 @@ function renderExerciseHistory(ex) {
     const setsHtml = s.sets.map(r =>
       `<div class="wh-exercise"><span class="wh-ex-name">Set</span><span class="wh-ex-sets">${r.weight}kg × ${r.reps} reps</span></div>`
     ).join('');
-    section.innerHTML = `<div class="wh-date">${label}</div>${setsHtml}`;
+    section.innerHTML = `
+      <div class="cal-hist-header">
+        <div class="wh-date">${label}</div>
+        <button class="cal-hist-delete" title="Delete">✕</button>
+      </div>
+      ${setsHtml}
+    `;
+    section.querySelector('.cal-hist-delete').addEventListener('click', async (e) => {
+      e.currentTarget.textContent = '…';
+      e.currentTarget.disabled = true;
+      // Remove this date entry from local state
+      ex.sets = ex.sets.filter(entry => entry.date !== s.date);
+      saveLocal();
+      await syncGymToCloud();
+      renderExerciseHistory(ex);
+    });
     body.appendChild(section);
   });
 }
@@ -1230,30 +1274,42 @@ updateWeightDisplay();
 
 async function saveDailySnapshot(dateStr) {
   if (!state.user) return;
-  // dateStr is YYYY-MM-DD
   const weight = loadWeight();
+  const today = localDateStr();
+  const isToday = dateStr === today;
 
-  // Sum foods for the given date
   let totalCal = 0, totalProtein = 0;
-  const dayStr = new Date(dateStr).toDateString();
-  // food_logs stores foods for a specific date — fetch that day's row
-  const { data: foodRow } = await sb.from('food_logs')
-    .select('foods')
-    .eq('user_id', state.user.id)
-    .eq('date', dayStr)
-    .single();
-  if (foodRow?.foods) {
-    foodRow.foods.forEach(f => {
+
+  if (isToday) {
+    // Read directly from local state — always up to date
+    (state.data.foods || []).forEach(f => {
       if (f.selected !== false) {
         const p = f.portions || 1;
         totalCal += (f.cal || 0) * p;
         totalProtein += (f.protein || 0) * p;
       }
     });
+  } else {
+    // For past days fetch from Supabase food_logs (keyed by localDateStr)
+    const { data: foodRow } = await sb.from('food_logs')
+      .select('foods')
+      .eq('user_id', state.user.id)
+      .eq('date', dateStr)
+      .single();
+    if (foodRow?.foods) {
+      foodRow.foods.forEach(f => {
+        if (f.selected !== false) {
+          const p = f.portions || 1;
+          totalCal += (f.cal || 0) * p;
+          totalProtein += (f.protein || 0) * p;
+        }
+      });
+    }
   }
 
   // Collect gym sets done that day across all workout types
   const gymSummary = {};
+  const dayStr = new Date(dateStr + 'T12:00:00').toDateString();
   for (const type of ['push', 'pull', 'legs']) {
     const { data: gymRows } = await sb.from('gym_logs')
       .select('snapshot')
