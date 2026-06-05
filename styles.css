@@ -862,14 +862,23 @@ html, body {
   touch-action: none;
 }
 .drag-handle:active { cursor: grabbing; color: var(--mid); }
-.exercise-item.drag-over {
-  border-color: var(--white);
-  background: #111;
+/* items slide smoothly — transition applied by JS during drag */
+.exercise-item {
+  will-change: transform;
 }
-.exercise-arrow {
-  color: #444;
+.exercise-history-btn {
+  background: none;
+  border: none;
+  color: #555;
   font-size: 18px;
+  cursor: pointer;
+  padding: 6px 8px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: color 0.15s;
 }
+.exercise-history-btn:active { color: var(--white); }
 
 /* ── WORKOUT TITLE TAP ── */
 .top-bar-title-btn {

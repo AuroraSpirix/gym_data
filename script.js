@@ -406,13 +406,6 @@ document.getElementById('modal-workout-history').addEventListener('click', e => 
     document.getElementById('modal-workout-history').classList.add('hidden');
 });
 
-document.getElementById('modal-history-btn').addEventListener('click', () => {
-  const ex = findExercise();
-  if (!ex) return;
-  document.getElementById('workout-history-title').textContent = ex.name;
-  renderExerciseHistory(ex);
-  document.getElementById('modal-workout-history').classList.remove('hidden');
-});
 
 function renderExerciseHistory(ex) {
   const body = document.getElementById('workout-history-body');
@@ -467,105 +460,170 @@ function renderExercises() {
     item.innerHTML = `
       <span class="drag-handle">⠿</span>
       <div class="exercise-name">${ex.name}</div>
-      <span class="exercise-arrow">›</span>
+      <button class="exercise-history-btn" title="History">↺</button>
     `;
 
-    // Tapping anywhere on the item opens modal, except the drag handle
+    // Tapping anywhere on the item opens modal, except the drag handle and history btn
     item.addEventListener('click', (e) => {
       if (e.target.closest('.drag-handle')) return;
+      if (e.target.closest('.exercise-history-btn')) return;
       openSetModal(ex.id);
     });
 
-    // Desktop drag: only enabled while holding the handle
-    const handle = item.querySelector('.drag-handle');
-    handle.addEventListener('mousedown', () => { item.draggable = true; });
-    document.addEventListener('mouseup', () => { item.draggable = false; }, { once: false });
-    item.addEventListener('dragstart', onDragStart);
-    item.addEventListener('dragover', onDragOver);
-    item.addEventListener('drop', onDrop);
-    item.addEventListener('dragend', (e) => { onDragEnd(e); item.draggable = false; });
+    item.querySelector('.exercise-history-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('workout-history-title').textContent = ex.name;
+      renderExerciseHistory(ex);
+      document.getElementById('modal-workout-history').classList.remove('hidden');
+    });
 
-    // Touch drag via handle only
-    handle.addEventListener('touchstart', onTouchDragStart, { passive: true });
+    // New smooth drag via handle
+    const handle = item.querySelector('.drag-handle');
+    handle.addEventListener('mousedown', onHandleMouseDown);
+    handle.addEventListener('touchstart', onHandleTouchStart, { passive: true });
 
     list.appendChild(item);
   });
 }
 
 // ── DRAG TO REORDER ────────────────────────────────────
-let dragSrcId = null;
+// Smooth "items slide aside" reorder — works for both mouse and touch.
 
-function onDragStart(e) {
-  dragSrcId = e.currentTarget.dataset.id;
-  e.currentTarget.style.opacity = '0.4';
-  e.dataTransfer.effectAllowed = 'move';
-}
-function onDragOver(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  document.querySelectorAll('.exercise-item').forEach(el => el.classList.remove('drag-over'));
-  if (e.currentTarget.dataset.id !== dragSrcId) e.currentTarget.classList.add('drag-over');
-}
-function onDrop(e) {
-  e.preventDefault();
-  const targetId = e.currentTarget.dataset.id;
-  if (!dragSrcId || dragSrcId === targetId) return;
-  const arr = state.data.workouts[state.currentWorkout];
-  const fromIdx = arr.findIndex(ex => ex.id === dragSrcId);
-  const toIdx = arr.findIndex(ex => ex.id === targetId);
-  if (fromIdx === -1 || toIdx === -1) return;
-  const [moved] = arr.splice(fromIdx, 1);
-  arr.splice(toIdx, 0, moved);
-  saveLocal(); syncGymToCloud(); renderExercises();
-}
-function onDragEnd(e) {
-  e.currentTarget.style.opacity = '';
-  document.querySelectorAll('.exercise-item').forEach(el => el.classList.remove('drag-over'));
-  dragSrcId = null;
+let activeDrag = null; // { id, el, floater, startY, lastY, origIdx, currentIdx, itemHeight }
+
+function getDragItems() {
+  return Array.from(document.querySelectorAll('#exercise-list .exercise-item'));
 }
 
-// Touch drag
-let touchDragId = null, touchDragEl = null, touchClone = null;
-function onTouchDragStart(e) {
-  const item = e.currentTarget.closest('.exercise-item');
-  touchDragId = item.dataset.id;
-  touchDragEl = item;
-  const touch = e.touches[0];
-  touchClone = item.cloneNode(true);
-  touchClone.style.cssText = `position:fixed;opacity:0.7;pointer-events:none;z-index:999;width:${item.offsetWidth}px;left:${item.getBoundingClientRect().left}px;top:${touch.clientY - item.offsetHeight/2}px;background:#111;`;
-  document.body.appendChild(touchClone);
-  item.style.opacity = '0.3';
-  document.addEventListener('touchmove', onTouchDragMove, { passive: false });
-  document.addEventListener('touchend', onTouchDragEnd);
+function startDrag(id, el, clientY) {
+  const items = getDragItems();
+  const origIdx = items.indexOf(el);
+  const rect = el.getBoundingClientRect();
+  const itemHeight = rect.height + 10; // height + gap
+
+  // Build a floating copy that follows the pointer
+  const floater = el.cloneNode(true);
+  floater.style.cssText = `
+    position: fixed;
+    left: ${rect.left}px;
+    top: ${rect.top}px;
+    width: ${rect.width}px;
+    height: ${rect.height}px;
+    z-index: 999;
+    pointer-events: none;
+    background: #1a1a1a;
+    border: 1px solid var(--white);
+    opacity: 0.95;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  `;
+  document.body.appendChild(floater);
+
+  // Make original invisible (holds its space)
+  el.style.opacity = '0';
+
+  activeDrag = { id, el, floater, startY: clientY, lastY: clientY, origIdx, currentIdx: origIdx, itemHeight, rectTop: rect.top };
 }
-function onTouchDragMove(e) {
-  e.preventDefault();
-  const touch = e.touches[0];
-  if (touchClone) touchClone.style.top = (touch.clientY - touchClone.offsetHeight / 2) + 'px';
-  document.querySelectorAll('.exercise-item').forEach(el => {
-    const rect = el.getBoundingClientRect();
-    el.classList.toggle('drag-over', el.dataset.id !== touchDragId && touch.clientY >= rect.top && touch.clientY <= rect.bottom);
+
+function moveDrag(clientY) {
+  if (!activeDrag) return;
+  const { floater, rectTop, el, origIdx, itemHeight } = activeDrag;
+
+  // Move the floater
+  const dy = clientY - activeDrag.startY;
+  floater.style.top = (rectTop + dy) + 'px';
+
+  // Determine which slot the floater centre is over
+  const floaterCY = parseFloat(floater.style.top) + el.offsetHeight / 2;
+  const items = getDragItems();
+  let newIdx = origIdx;
+  items.forEach((item, i) => {
+    if (item === el) return;
+    const r = item.getBoundingClientRect();
+    const mid = r.top + r.height / 2;
+    if (floaterCY > mid) newIdx = i;
+  });
+  newIdx = Math.max(0, Math.min(items.length - 1, newIdx));
+
+  if (newIdx !== activeDrag.currentIdx) {
+    activeDrag.currentIdx = newIdx;
+    applyDragShifts(items, origIdx, newIdx, el.offsetHeight);
+  }
+
+  activeDrag.lastY = clientY;
+}
+
+function applyDragShifts(items, origIdx, targetIdx, draggedHeight) {
+  const shift = draggedHeight + 10; // height + gap
+  items.forEach((item, i) => {
+    if (item === activeDrag.el) return;
+    let translate = 0;
+    if (origIdx < targetIdx) {
+      // dragging down: items between origIdx+1..targetIdx slide up
+      if (i > origIdx && i <= targetIdx) translate = -shift;
+    } else {
+      // dragging up: items between targetIdx..origIdx-1 slide down
+      if (i >= targetIdx && i < origIdx) translate = shift;
+    }
+    item.style.transition = 'transform 0.18s ease';
+    item.style.transform = translate ? `translateY(${translate}px)` : '';
   });
 }
-function onTouchDragEnd() {
-  document.removeEventListener('touchmove', onTouchDragMove);
-  document.removeEventListener('touchend', onTouchDragEnd);
-  if (touchClone) { touchClone.remove(); touchClone = null; }
-  if (touchDragEl) touchDragEl.style.opacity = '';
-  const overEl = document.querySelector('.exercise-item.drag-over');
-  if (overEl && touchDragId && overEl.dataset.id !== touchDragId) {
+
+function endDrag() {
+  if (!activeDrag) return;
+  const { id, el, floater, origIdx, currentIdx } = activeDrag;
+  activeDrag = null;
+
+  // Clean up floater and shifts
+  floater.remove();
+  getDragItems().forEach(item => {
+    item.style.transition = '';
+    item.style.transform = '';
+  });
+  el.style.opacity = '';
+
+  if (origIdx !== currentIdx) {
     const arr = state.data.workouts[state.currentWorkout];
-    const fromIdx = arr.findIndex(ex => ex.id === touchDragId);
-    const toIdx = arr.findIndex(ex => ex.id === overEl.dataset.id);
-    if (fromIdx !== -1 && toIdx !== -1) {
-      const [moved] = arr.splice(fromIdx, 1);
-      arr.splice(toIdx, 0, moved);
-      saveLocal(); syncGymToCloud();
-    }
+    const [moved] = arr.splice(origIdx, 1);
+    arr.splice(currentIdx, 0, moved);
+    saveLocal(); syncGymToCloud();
+    renderExercises();
   }
-  document.querySelectorAll('.exercise-item').forEach(el => el.classList.remove('drag-over'));
-  touchDragEl = null; touchDragId = null;
-  renderExercises();
+}
+
+// Mouse events (handle only)
+function onHandleMouseDown(e) {
+  e.preventDefault();
+  const item = e.currentTarget.closest('.exercise-item');
+  startDrag(item.dataset.id, item, e.clientY);
+
+  function onMouseMove(e) { moveDrag(e.clientY); }
+  function onMouseUp() {
+    endDrag();
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  }
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+}
+
+// Touch events (handle only)
+function onHandleTouchStart(e) {
+  const item = e.currentTarget.closest('.exercise-item');
+  const touch = e.touches[0];
+  startDrag(item.dataset.id, item, touch.clientY);
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    moveDrag(e.touches[0].clientY);
+  }
+  function onTouchEnd() {
+    endDrag();
+    document.removeEventListener('touchmove', onTouchMove);
+    document.removeEventListener('touchend', onTouchEnd);
+  }
+  document.addEventListener('touchmove', onTouchMove, { passive: false });
+  document.addEventListener('touchend', onTouchEnd);
 }
 
 document.getElementById('add-exercise-btn').addEventListener('click', () => {
