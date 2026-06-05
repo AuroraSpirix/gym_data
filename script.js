@@ -32,6 +32,14 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+// Always use local date so timezone never shifts the day boundary
+function localDateStr(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function findExercise() {
   return state.data.workouts[state.currentWorkout]
     .find(e => e.id === state.currentExerciseId);
@@ -151,8 +159,8 @@ async function loadFoodsFromCloud() {
     state.data.foods = data.foods || [];
     saveLocal();
   }
-  // Re-apply daily reset (in case cloud had stale foods from yesterday)
   checkDailyFoodReset();
+}
 
 async function syncFoodLibraryToCloud() {
   if (!state.user) return;
@@ -187,11 +195,11 @@ function ensureFoodLibrary() {
   });
 }
 
+// ── DAILY FOOD RESET ───────────────────────────────────
 function checkDailyFoodReset() {
   const today = new Date().toDateString();
   const lastDay = localStorage.getItem('grind_food_day');
   if (lastDay && lastDay !== today) {
-    // New day — clear today's food list (archive already happened via daily_snapshots)
     state.data.foods = [];
     saveLocal();
   }
@@ -199,33 +207,17 @@ function checkDailyFoodReset() {
 }
 
 // ── CALORIE HISTORY MODAL ──────────────────────────────
-document.getElementById('cal-history-btn').addEventListener('click', openCalHistoryModal);
-document.getElementById('cal-history-close').addEventListener('click', () => {
-  document.getElementById('modal-cal-history').classList.add('hidden');
-});
-document.getElementById('modal-cal-history').addEventListener('click', e => {
-  if (e.target === document.getElementById('modal-cal-history'))
-    document.getElementById('modal-cal-history').classList.add('hidden');
-});
-
 async function openCalHistoryModal() {
   document.getElementById('modal-cal-history').classList.remove('hidden');
   const body = document.getElementById('cal-history-body');
   body.innerHTML = '<div class="wh-empty">Loading…</div>';
-
   if (!state.user) { body.innerHTML = '<div class="wh-empty">Not logged in</div>'; return; }
-
   const { data, error } = await sb.from('daily_snapshots')
     .select('date, total_kcal, total_protein')
     .eq('user_id', state.user.id)
     .order('date', { ascending: false })
     .limit(30);
-
-  if (error || !data?.length) {
-    body.innerHTML = '<div class="wh-empty">No history yet</div>';
-    return;
-  }
-
+  if (error || !data?.length) { body.innerHTML = '<div class="wh-empty">No history yet</div>'; return; }
   body.innerHTML = '';
   data.forEach(row => {
     const label = new Date(row.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -243,7 +235,7 @@ async function openCalHistoryModal() {
   });
 }
 
-
+// ── AUTH ────────────────────────────────────────────────
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
   if (session?.user) {
@@ -254,10 +246,8 @@ async function init() {
 }
 
 async function onLogin() {
-  // Load local first for instant feel, then sync from cloud
   state.data = loadLocal();
   ensureFoodLibrary();
-  // Reset today's foods if it's a new day
   checkDailyFoodReset();
   renderExercises();
   showScreen('home');
@@ -322,6 +312,15 @@ document.getElementById('btn-calories').addEventListener('click', () => {
   showScreen('calories');
 });
 
+document.getElementById('cal-history-btn').addEventListener('click', openCalHistoryModal);
+document.getElementById('cal-history-close').addEventListener('click', () => {
+  document.getElementById('modal-cal-history').classList.add('hidden');
+});
+document.getElementById('modal-cal-history').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-cal-history'))
+    document.getElementById('modal-cal-history').classList.add('hidden');
+});
+
 // ── BACK BUTTONS ───────────────────────────────────────
 document.querySelectorAll('.back-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -369,7 +368,48 @@ function archiveDeselectedFoods() {
   });
 });
 
-// ── WORKOUT / EXERCISES ────────────────────────────────
+// ── EXERCISE HISTORY MODAL ─────────────────────────────
+document.getElementById('workout-history-close').addEventListener('click', () => {
+  document.getElementById('modal-workout-history').classList.add('hidden');
+});
+document.getElementById('modal-workout-history').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-workout-history'))
+    document.getElementById('modal-workout-history').classList.add('hidden');
+});
+
+document.getElementById('modal-history-btn').addEventListener('click', () => {
+  const ex = findExercise();
+  if (!ex) return;
+  document.getElementById('workout-history-title').textContent = ex.name;
+  renderExerciseHistory(ex);
+  document.getElementById('modal-workout-history').classList.remove('hidden');
+});
+
+function renderExerciseHistory(ex) {
+  const body = document.getElementById('workout-history-body');
+  body.innerHTML = '';
+  const today = new Date().toDateString();
+  const past = ex.sets
+    .filter(s => new Date(s.date).toDateString() !== today)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  if (!past.length) {
+    body.innerHTML = '<div class="wh-empty">No past sessions yet</div>';
+    return;
+  }
+  past.forEach(s => {
+    const label = new Date(s.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const section = document.createElement('div');
+    section.className = 'wh-session';
+    const setsHtml = s.sets.map(r =>
+      `<div class="wh-exercise"><span class="wh-ex-name">Set</span><span class="wh-ex-sets">${r.weight}kg × ${r.reps} reps</span></div>`
+    ).join('');
+    section.innerHTML = `<div class="wh-date">${label}</div>${setsHtml}`;
+    body.appendChild(section);
+  });
+}
+
+
 function renderExercises() {
   const list = document.getElementById('exercise-list');
   if (!state.currentWorkout) return;
@@ -379,30 +419,36 @@ function renderExercises() {
     const item = document.createElement('div');
     item.className = 'exercise-item';
     item.dataset.id = ex.id;
-    item.draggable = true;
+    // NOT draggable by default — only the handle sets draggable on mousedown/touchstart
     item.innerHTML = `
-      <span class="drag-handle" title="Drag to reorder">⠿</span>
+      <span class="drag-handle">⠿</span>
       <div class="exercise-name">${ex.name}</div>
-      <span style="color:#444;font-size:18px;">›</span>
+      <span class="exercise-arrow">›</span>
     `;
-    // Tap on name/arrow opens modal; drag handle is for dragging only
-    item.querySelector('.exercise-name').addEventListener('click', () => openSetModal(ex.id));
-    item.querySelector('span[style]').addEventListener('click', () => openSetModal(ex.id));
 
-    // Drag events
+    // Tapping anywhere on the item opens modal, except the drag handle
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.drag-handle')) return;
+      openSetModal(ex.id);
+    });
+
+    // Desktop drag: only enabled while holding the handle
+    const handle = item.querySelector('.drag-handle');
+    handle.addEventListener('mousedown', () => { item.draggable = true; });
+    document.addEventListener('mouseup', () => { item.draggable = false; }, { once: false });
     item.addEventListener('dragstart', onDragStart);
     item.addEventListener('dragover', onDragOver);
     item.addEventListener('drop', onDrop);
-    item.addEventListener('dragend', onDragEnd);
+    item.addEventListener('dragend', (e) => { onDragEnd(e); item.draggable = false; });
 
-    // Touch drag
-    item.querySelector('.drag-handle').addEventListener('touchstart', onTouchDragStart, { passive: true });
+    // Touch drag via handle only
+    handle.addEventListener('touchstart', onTouchDragStart, { passive: true });
 
     list.appendChild(item);
   });
 }
 
-// ── EXERCISE DRAG-TO-REORDER ───────────────────────────
+// ── DRAG TO REORDER ────────────────────────────────────
 let dragSrcId = null;
 
 function onDragStart(e) {
@@ -410,15 +456,12 @@ function onDragStart(e) {
   e.currentTarget.style.opacity = '0.4';
   e.dataTransfer.effectAllowed = 'move';
 }
-
 function onDragOver(e) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  const target = e.currentTarget;
   document.querySelectorAll('.exercise-item').forEach(el => el.classList.remove('drag-over'));
-  if (target.dataset.id !== dragSrcId) target.classList.add('drag-over');
+  if (e.currentTarget.dataset.id !== dragSrcId) e.currentTarget.classList.add('drag-over');
 }
-
 function onDrop(e) {
   e.preventDefault();
   const targetId = e.currentTarget.dataset.id;
@@ -429,20 +472,16 @@ function onDrop(e) {
   if (fromIdx === -1 || toIdx === -1) return;
   const [moved] = arr.splice(fromIdx, 1);
   arr.splice(toIdx, 0, moved);
-  saveLocal();
-  syncGymToCloud();
-  renderExercises();
+  saveLocal(); syncGymToCloud(); renderExercises();
 }
-
 function onDragEnd(e) {
   e.currentTarget.style.opacity = '';
   document.querySelectorAll('.exercise-item').forEach(el => el.classList.remove('drag-over'));
   dragSrcId = null;
 }
 
-// Touch-based drag reorder
-let touchDragEl = null, touchDragId = null, touchClone = null;
-
+// Touch drag
+let touchDragId = null, touchDragEl = null, touchClone = null;
 function onTouchDragStart(e) {
   const item = e.currentTarget.closest('.exercise-item');
   touchDragId = item.dataset.id;
@@ -452,31 +491,23 @@ function onTouchDragStart(e) {
   touchClone.style.cssText = `position:fixed;opacity:0.7;pointer-events:none;z-index:999;width:${item.offsetWidth}px;left:${item.getBoundingClientRect().left}px;top:${touch.clientY - item.offsetHeight/2}px;background:#111;`;
   document.body.appendChild(touchClone);
   item.style.opacity = '0.3';
-
   document.addEventListener('touchmove', onTouchDragMove, { passive: false });
   document.addEventListener('touchend', onTouchDragEnd);
 }
-
 function onTouchDragMove(e) {
   e.preventDefault();
   const touch = e.touches[0];
   if (touchClone) touchClone.style.top = (touch.clientY - touchClone.offsetHeight / 2) + 'px';
-  // Highlight drop target
   document.querySelectorAll('.exercise-item').forEach(el => {
     const rect = el.getBoundingClientRect();
-    el.classList.toggle('drag-over',
-      el.dataset.id !== touchDragId &&
-      touch.clientY >= rect.top && touch.clientY <= rect.bottom
-    );
+    el.classList.toggle('drag-over', el.dataset.id !== touchDragId && touch.clientY >= rect.top && touch.clientY <= rect.bottom);
   });
 }
-
-function onTouchDragEnd(e) {
+function onTouchDragEnd() {
   document.removeEventListener('touchmove', onTouchDragMove);
   document.removeEventListener('touchend', onTouchDragEnd);
   if (touchClone) { touchClone.remove(); touchClone = null; }
-  if (touchDragEl) { touchDragEl.style.opacity = ''; }
-
+  if (touchDragEl) touchDragEl.style.opacity = '';
   const overEl = document.querySelector('.exercise-item.drag-over');
   if (overEl && touchDragId && overEl.dataset.id !== touchDragId) {
     const arr = state.data.workouts[state.currentWorkout];
@@ -485,78 +516,15 @@ function onTouchDragEnd(e) {
     if (fromIdx !== -1 && toIdx !== -1) {
       const [moved] = arr.splice(fromIdx, 1);
       arr.splice(toIdx, 0, moved);
-      saveLocal();
-      syncGymToCloud();
+      saveLocal(); syncGymToCloud();
     }
   }
   document.querySelectorAll('.exercise-item').forEach(el => el.classList.remove('drag-over'));
-  touchDragEl = null;
-  touchDragId = null;
+  touchDragEl = null; touchDragId = null;
   renderExercises();
 }
 
-// ── WORKOUT HISTORY MODAL ──────────────────────────────
-document.getElementById('workout-title').addEventListener('click', openWorkoutHistoryModal);
-
-function openWorkoutHistoryModal() {
-  const type = state.currentWorkout;
-  if (!type) return;
-  document.getElementById('workout-history-title').textContent = type.toUpperCase() + ' HISTORY';
-  renderWorkoutHistory(type);
-  document.getElementById('modal-workout-history').classList.remove('hidden');
-}
-
-document.getElementById('workout-history-close').addEventListener('click', () => {
-  document.getElementById('modal-workout-history').classList.add('hidden');
-});
-document.getElementById('modal-workout-history').addEventListener('click', e => {
-  if (e.target === document.getElementById('modal-workout-history'))
-    document.getElementById('modal-workout-history').classList.add('hidden');
-});
-
-function renderWorkoutHistory(type) {
-  const body = document.getElementById('workout-history-body');
-  body.innerHTML = '';
-  const exercises = state.data.workouts[type] || [];
-  const today = new Date().toDateString();
-
-  // Collect all past dates across all exercises
-  const allDates = new Set();
-  exercises.forEach(ex => {
-    ex.sets.forEach(s => {
-      if (new Date(s.date).toDateString() !== today) allDates.add(s.date);
-    });
-  });
-
-  // Sort dates newest first
-  const sortedDates = [...allDates].sort((a, b) => new Date(b) - new Date(a));
-
-  if (!sortedDates.length) {
-    body.innerHTML = '<div class="wh-empty">No past sessions yet</div>';
-    return;
-  }
-
-  sortedDates.forEach(dateStr => {
-    const dayStr = new Date(dateStr).toDateString();
-    const label = new Date(dateStr).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-
-    const section = document.createElement('div');
-    section.className = 'wh-session';
-
-    let html = `<div class="wh-date">${label}</div>`;
-    exercises.forEach(ex => {
-      const entry = ex.sets.find(s => new Date(s.date).toDateString() === dayStr);
-      if (!entry || !entry.sets.length) return;
-      const setsStr = entry.sets.map(r => `${r.weight}kg×${r.reps}`).join('  ');
-      html += `<div class="wh-exercise"><span class="wh-ex-name">${ex.name}</span><span class="wh-ex-sets">${setsStr}</span></div>`;
-    });
-
-    section.innerHTML = html;
-    body.appendChild(section);
-  });
-}
-
-
+document.getElementById('add-exercise-btn').addEventListener('click', () => {
   const input = document.getElementById('exercise-name-input');
   const name = input.value.trim();
   if (!name) return;
@@ -597,7 +565,6 @@ function openSetModal(exerciseId) {
     buildSetRow(i + 1, todaySets[i] || null);
   }
 
-  renderModalHistory(ex);
   document.getElementById('modal-set').classList.remove('hidden');
 }
 
@@ -721,7 +688,6 @@ function autoSaveSets() {
   }
   saveLocal();
   renderExercises();
-  renderModalHistory(ex);
 
   clearTimeout(saveDebounce);
   saveDebounce = setTimeout(() => syncGymToCloud(), 1200);
@@ -740,23 +706,6 @@ function buildSetRow(num, prefill = null) {
   row.querySelector('.set-reps-input').addEventListener('input', autoSaveSets);
   container.appendChild(row);
 }
-
-function renderModalHistory(ex) {
-  const hist = document.getElementById('modal-history');
-  hist.innerHTML = '';
-  const today = new Date().toDateString();
-  const prev = ex.sets.filter(s => new Date(s.date).toDateString() !== today).slice(-3).reverse();
-  prev.forEach((s) => {
-    const row = document.createElement('div');
-    row.className = 'history-row';
-    const summary = s.sets.map(r => `${r.weight}kg×${r.reps}`).join('  ');
-    const label = new Date(s.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    row.innerHTML = `<span>${label}</span><span>${summary}</span>`;
-    hist.appendChild(row);
-  });
-}
-
-
 
 function closeModal() {
   document.getElementById('modal-set').classList.add('hidden');
@@ -1222,7 +1171,7 @@ function saveWeight(val) {
 
 async function syncWeightToCloud(val) {
   if (!state.user) return;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateStr();
   const { error } = await sb.from('weight_logs').upsert({
     user_id: state.user.id,
     date: today,
@@ -1338,11 +1287,9 @@ async function saveDailySnapshot(dateStr) {
 }
 
 async function sealYesterdayIfNeeded() {
-  // On login, make sure yesterday's snapshot is saved
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  const yStr = yesterday.toISOString().slice(0, 10);
-  // Only seal if there's any food or gym data for yesterday
+  const yStr = localDateStr(yesterday);
   const dayStr = yesterday.toDateString();
   const { data: foodRow } = await sb.from('food_logs')
     .select('date')
@@ -1356,7 +1303,7 @@ let snapshotDebounce = null;
 function queueDailySnapshot() {
   clearTimeout(snapshotDebounce);
   snapshotDebounce = setTimeout(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateStr();
     saveDailySnapshot(today);
   }, 3000);
 }

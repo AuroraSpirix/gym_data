@@ -69,7 +69,7 @@
   <div id="screen-workout" class="screen">
     <div class="top-bar">
       <button class="back-btn" data-target="gym">←</button>
-      <span class="top-bar-title top-bar-title-btn" id="workout-title">PUSH</span>
+      <span class="top-bar-title" id="workout-title">PUSH</span>
       <div class="timer-block">
         <span id="timer-display" class="timer-display">2:00</span>
         <button id="timer-reset" class="timer-btn">↺</button>
@@ -90,6 +90,7 @@
       <div class="modal-title-row">
         <span class="modal-title" id="modal-exercise-name" contenteditable="false" spellcheck="false"></span>
         <span class="rep-range-display hidden" id="rep-range-display"></span>
+        <button id="modal-history-btn" class="notes-btn" title="History">↺</button>
         <button id="modal-notes-btn" class="notes-btn" title="Notes">≡</button>
       </div>
       <div id="exercise-edit-panel" class="exercise-edit-panel hidden">
@@ -112,7 +113,6 @@
         </div>
         <div id="rep-rows"></div>
       </div>
-      <div class="modal-history" id="modal-history"></div>
     </div>
   </div>
 
@@ -121,7 +121,7 @@
     <div class="top-bar">
       <button class="back-btn" data-target="home">←</button>
       <span class="top-bar-title">CALORIES</span>
-      <button id="cal-history-btn" class="notes-btn" title="History">📅</button>
+      <button id="cal-history-btn" class="notes-btn cal-history-btn" title="Past days">⊟</button>
     </div>
     <div class="cal-body">
       <div class="cal-totals">

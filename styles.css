@@ -855,7 +855,7 @@ html, body {
   color: #333;
   font-size: 18px;
   cursor: grab;
-  padding: 0 10px 0 4px;
+  padding: 0 10px 0 2px;
   flex-shrink: 0;
   user-select: none;
   line-height: 1;
@@ -866,16 +866,20 @@ html, body {
   border-color: var(--white);
   background: #111;
 }
+.exercise-arrow {
+  color: #444;
+  font-size: 18px;
+}
 
-/* ── TOP BAR TITLE BUTTON ── */
+/* ── WORKOUT TITLE TAP ── */
 .top-bar-title-btn {
   cursor: pointer;
   user-select: none;
   transition: opacity 0.15s;
 }
-.top-bar-title-btn:active { opacity: 0.6; }
+.top-bar-title-btn:active { opacity: 0.5; }
 
-/* ── WORKOUT HISTORY MODAL ── */
+/* ── SHARED HISTORY MODAL STYLES ── */
 .modal-box-scroll {
   max-height: 80vh;
   overflow-y: auto;
@@ -893,7 +897,7 @@ html, body {
   padding-bottom: 16px;
   border-bottom: 1px solid var(--line);
 }
-.wh-session:last-child { border-bottom: none; }
+.wh-session:last-child { border-bottom: none; padding-bottom: 0; }
 .wh-date {
   font-family: var(--font-display);
   font-size: 18px;
@@ -934,7 +938,6 @@ html, body {
   display: flex;
   align-items: baseline;
   gap: 5px;
-  font-size: 13px;
 }
 .cal-hist-num {
   font-family: var(--font-display);
@@ -948,12 +951,22 @@ html, body {
 }
 .cal-hist-sep {
   color: #333;
-  margin: 0 4px;
+  margin: 0 6px;
 }
 
-/* ── CAL HISTORY BTN ── */
-#cal-history-btn {
-  font-size: 14px;
-  padding: 8px 10px;
+/* ── CAL HISTORY BUTTON ── */
+.cal-history-btn {
+  font-size: 18px;
+  padding: 6px 10px;
   letter-spacing: 0;
+}
+
+/* ── AUTOFILL OVERRIDE ── */
+input:-webkit-autofill,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--black) inset !important;
+  -webkit-text-fill-color: var(--white) !important;
+  caret-color: var(--white);
+  border-color: var(--line) !important;
+  transition: background-color 9999s ease-in-out 0s;
 }
