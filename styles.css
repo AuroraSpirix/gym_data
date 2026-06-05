@@ -850,3 +850,110 @@ html, body {
   color: var(--mid);
   font-size: 14px;
 }
+/* ── DRAG HANDLE ── */
+.drag-handle {
+  color: #333;
+  font-size: 18px;
+  cursor: grab;
+  padding: 0 10px 0 4px;
+  flex-shrink: 0;
+  user-select: none;
+  line-height: 1;
+  touch-action: none;
+}
+.drag-handle:active { cursor: grabbing; color: var(--mid); }
+.exercise-item.drag-over {
+  border-color: var(--white);
+  background: #111;
+}
+
+/* ── TOP BAR TITLE BUTTON ── */
+.top-bar-title-btn {
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s;
+}
+.top-bar-title-btn:active { opacity: 0.6; }
+
+/* ── WORKOUT HISTORY MODAL ── */
+.modal-box-scroll {
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.workout-history-body,
+.cal-history-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.wh-session {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.wh-session:last-child { border-bottom: none; }
+.wh-date {
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: 0.1em;
+  color: var(--white);
+}
+.wh-exercise {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.wh-ex-name {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mid);
+  flex: 1;
+  min-width: 0;
+}
+.wh-ex-sets {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--white);
+  text-align: right;
+  flex-shrink: 0;
+}
+.wh-empty {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: #444;
+  text-align: center;
+  padding: 24px 0;
+}
+
+/* ── CALORIE HISTORY ROWS ── */
+.cal-hist-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 13px;
+}
+.cal-hist-num {
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: var(--white);
+}
+.cal-hist-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--mid);
+}
+.cal-hist-sep {
+  color: #333;
+  margin: 0 4px;
+}
+
+/* ── CAL HISTORY BTN ── */
+#cal-history-btn {
+  font-size: 14px;
+  padding: 8px 10px;
+  letter-spacing: 0;
+}

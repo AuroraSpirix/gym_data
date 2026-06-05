@@ -69,7 +69,7 @@
   <div id="screen-workout" class="screen">
     <div class="top-bar">
       <button class="back-btn" data-target="gym">←</button>
-      <span class="top-bar-title" id="workout-title">PUSH</span>
+      <span class="top-bar-title top-bar-title-btn" id="workout-title">PUSH</span>
       <div class="timer-block">
         <span id="timer-display" class="timer-display">2:00</span>
         <button id="timer-reset" class="timer-btn">↺</button>
@@ -121,6 +121,7 @@
     <div class="top-bar">
       <button class="back-btn" data-target="home">←</button>
       <span class="top-bar-title">CALORIES</span>
+      <button id="cal-history-btn" class="notes-btn" title="History">📅</button>
     </div>
     <div class="cal-body">
       <div class="cal-totals">
@@ -184,6 +185,28 @@
       <span class="modal-picker-label">FOOD TYPE</span>
       <div class="meal-grid" id="food-edit-tag-grid"></div>
       <button type="button" class="delete-food-library-btn" id="food-edit-delete">DELETE FOOD</button>
+    </div>
+  </div>
+
+  <!-- WORKOUT HISTORY MODAL -->
+  <div id="modal-workout-history" class="modal hidden">
+    <div class="modal-box modal-box-scroll">
+      <div class="modal-title-row">
+        <span class="modal-title" id="workout-history-title">PUSH HISTORY</span>
+        <button id="workout-history-close" class="notes-btn">✕</button>
+      </div>
+      <div id="workout-history-body" class="workout-history-body"></div>
+    </div>
+  </div>
+
+  <!-- CALORIE HISTORY MODAL -->
+  <div id="modal-cal-history" class="modal hidden">
+    <div class="modal-box modal-box-scroll">
+      <div class="modal-title-row">
+        <span class="modal-title">HISTORY</span>
+        <button id="cal-history-close" class="notes-btn">✕</button>
+      </div>
+      <div id="cal-history-body" class="cal-history-body"></div>
     </div>
   </div>
 
