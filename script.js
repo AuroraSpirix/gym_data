@@ -103,24 +103,34 @@ async function loadGymFromCloud() {
   if (error) { console.error(error); return; }
   if (!data || !data.length) return;
 
-  // Rebuild workouts: merge all historical snapshots, latest wins for each exercise
+  // Use the most recent snapshot's order as the master order for each type.
+  // Then merge in any sets from older snapshots that aren't already present.
   const workouts = { push: [], pull: [], legs: [] };
+  const latestByType = {};
 
-  // Process oldest to newest so latest overwrites
+  // Collect the most recent snapshot for each workout type
+  data.forEach(log => {
+    const type = log.type;
+    if (!workouts[type] || latestByType[type]) return;
+    latestByType[type] = log.snapshot;
+    // Seed the workout list with the latest snapshot's order/names/notes
+    workouts[type] = log.snapshot.map(ex => ({ ...ex, sets: [...ex.sets] }));
+  });
+
+  // Now merge sets from older snapshots (process oldest to newest)
   [...data].reverse().forEach(log => {
     const type = log.type;
     if (!workouts[type]) return;
     log.snapshot.forEach(ex => {
       const existing = workouts[type].find(e => e.id === ex.id);
       if (existing) {
-        existing.name = ex.name;
-        existing.notes = ex.notes || '';
         // Merge sets by date, avoiding duplicates
         ex.sets.forEach(s => {
           const dup = existing.sets.find(es => es.date === s.date);
           if (!dup) existing.sets.push(s);
         });
       } else {
+        // Exercise existed in older logs but not latest — append at end
         workouts[type].push({ ...ex, sets: [...ex.sets] });
       }
     });
@@ -270,8 +280,11 @@ async function init() {
   if (session?.user) {
     state.user = session.user;
     await onLogin();
+  } else {
+    // Re-enable transitions before showing login
+    document.querySelectorAll('.screen').forEach(s => s.style.transition = '');
+    showScreen('login');
   }
-  // else stay on login screen
 }
 
 async function onLogin() {
@@ -279,6 +292,8 @@ async function onLogin() {
   ensureFoodLibrary();
   checkDailyFoodReset();
   renderExercises();
+  // Re-enable transitions before showing home
+  document.querySelectorAll('.screen').forEach(s => s.style.transition = '');
   showScreen('home');
   await loadGymFromCloud();
   await loadFoodsFromCloud();
@@ -423,8 +438,11 @@ function renderExerciseHistory(ex) {
     const label = new Date(s.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
     const section = document.createElement('div');
     section.className = 'wh-session';
-    const setsHtml = s.sets.map(r =>
-      `<div class="wh-exercise"><span class="wh-ex-name">Set</span><span class="wh-ex-sets">${r.weight}kg × ${r.reps} reps</span></div>`
+    const setsHtml = s.sets.map((r, ri) =>
+      `<div class="wh-exercise">
+        <span class="wh-ex-name">Set ${ri + 1}</span>
+        <span class="wh-ex-sets wh-ex-sets-editable" data-date="${s.date}" data-set-idx="${ri}" title="Tap to edit">${r.weight}kg × ${r.reps} reps</span>
+      </div>`
     ).join('');
     section.innerHTML = `
       <div class="cal-hist-header">
@@ -436,13 +454,60 @@ function renderExerciseHistory(ex) {
     section.querySelector('.cal-hist-delete').addEventListener('click', async (e) => {
       e.currentTarget.textContent = '…';
       e.currentTarget.disabled = true;
-      // Remove this date entry from local state
       ex.sets = ex.sets.filter(entry => entry.date !== s.date);
       saveLocal();
       await syncGymToCloud();
       renderExerciseHistory(ex);
     });
+    // Make each set row editable on tap
+    section.querySelectorAll('.wh-ex-sets-editable').forEach(el => {
+      el.addEventListener('click', () => {
+        const setIdx = parseInt(el.dataset.setIdx);
+        const entryDate = el.dataset.date;
+        const entry = ex.sets.find(e => e.date === entryDate);
+        if (!entry) return;
+        const set = entry.sets[setIdx];
+        if (!set) return;
+        openHistorySetEditor(ex, entry, setIdx, set, el);
+      });
+    });
     body.appendChild(section);
+  });
+}
+
+function openHistorySetEditor(ex, entry, setIdx, set, labelEl) {
+  // Remove any existing inline editor
+  const existing = document.querySelector('.history-inline-editor');
+  if (existing) existing.remove();
+
+  const editor = document.createElement('div');
+  editor.className = 'history-inline-editor';
+  editor.innerHTML = `
+    <input type="number" class="text-input small hist-edit-weight" value="${set.weight}" inputmode="decimal" placeholder="kg" />
+    <span class="rep-range-dash">×</span>
+    <input type="number" class="text-input small hist-edit-reps" value="${set.reps}" inputmode="numeric" placeholder="reps" />
+    <button class="icon-btn hist-edit-save" style="font-size:14px;width:36px;height:36px;">✓</button>
+  `;
+
+  // Insert editor below the clicked label
+  labelEl.closest('.wh-exercise').after(editor);
+  editor.querySelector('.hist-edit-weight').focus();
+
+  const save = () => {
+    const newWeight = parseFloat(editor.querySelector('.hist-edit-weight').value);
+    const newReps = parseInt(editor.querySelector('.hist-edit-reps').value);
+    if (!isNaN(newWeight) && !isNaN(newReps) && newReps > 0) {
+      entry.sets[setIdx] = { weight: newWeight, reps: newReps };
+      labelEl.textContent = `${newWeight}kg × ${newReps} reps`;
+      saveLocal();
+      syncGymToCloud();
+    }
+    editor.remove();
+  };
+
+  editor.querySelector('.hist-edit-save').addEventListener('click', save);
+  editor.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
   });
 }
 
@@ -489,7 +554,7 @@ function renderExercises() {
 // ── DRAG TO REORDER ────────────────────────────────────
 // Smooth "items slide aside" reorder — works for both mouse and touch.
 
-let activeDrag = null; // { id, el, floater, startY, lastY, origIdx, currentIdx, itemHeight }
+let activeDrag = null; // { id, el, floater, startY, lastY, origIdx, currentIdx, pointerOffsetY }
 
 function getDragItems() {
   return Array.from(document.querySelectorAll('#exercise-list .exercise-item'));
@@ -499,7 +564,9 @@ function startDrag(id, el, clientY) {
   const items = getDragItems();
   const origIdx = items.indexOf(el);
   const rect = el.getBoundingClientRect();
-  const itemHeight = rect.height + 10; // height + gap
+
+  // How far from the top of the element the pointer is
+  const pointerOffsetY = clientY - rect.top;
 
   // Build a floating copy that follows the pointer
   const floater = el.cloneNode(true);
@@ -515,25 +582,27 @@ function startDrag(id, el, clientY) {
     border: 1px solid var(--white);
     opacity: 0.95;
     box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    transition: none;
   `;
   document.body.appendChild(floater);
 
   // Make original invisible (holds its space)
   el.style.opacity = '0';
 
-  activeDrag = { id, el, floater, startY: clientY, lastY: clientY, origIdx, currentIdx: origIdx, itemHeight, rectTop: rect.top };
+  activeDrag = { id, el, floater, origIdx, currentIdx: origIdx, pointerOffsetY };
 }
 
 function moveDrag(clientY) {
   if (!activeDrag) return;
-  const { floater, rectTop, el, origIdx, itemHeight } = activeDrag;
+  const { floater, el, origIdx, pointerOffsetY } = activeDrag;
 
-  // Move the floater
-  const dy = clientY - activeDrag.startY;
-  floater.style.top = (rectTop + dy) + 'px';
+  // Floater top = pointer position minus where finger touches within item
+  const floaterTop = clientY - pointerOffsetY;
+  floater.style.top = floaterTop + 'px';
 
-  // Determine which slot the floater centre is over
-  const floaterCY = parseFloat(floater.style.top) + el.offsetHeight / 2;
+  // Centre of the floater in viewport coords
+  const floaterCY = floaterTop + el.offsetHeight / 2;
+
   const items = getDragItems();
   let newIdx = origIdx;
   items.forEach((item, i) => {
@@ -548,8 +617,6 @@ function moveDrag(clientY) {
     activeDrag.currentIdx = newIdx;
     applyDragShifts(items, origIdx, newIdx, el.offsetHeight);
   }
-
-  activeDrag.lastY = clientY;
 }
 
 function applyDragShifts(items, origIdx, targetIdx, draggedHeight) {
@@ -663,8 +730,19 @@ function openSetModal(exerciseId) {
   const todayEntry = ex.sets.find(s => new Date(s.date).toDateString() === today);
   const todaySets = todayEntry ? todayEntry.sets : [];
 
+  // Find yesterday's sets as defaults when today has no data
+  let yesterdaySets = [];
+  if (!todayEntry || todaySets.length === 0) {
+    // Sort by date descending, pick the most recent past entry
+    const pastEntries = ex.sets
+      .filter(s => new Date(s.date).toDateString() !== today)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (pastEntries.length) yesterdaySets = pastEntries[0].sets || [];
+  }
+
   for (let i = 0; i < 3; i++) {
-    buildSetRow(i + 1, todaySets[i] || null);
+    // Use today's set if it exists, else yesterday's as default (greyed out placeholder)
+    buildSetRow(i + 1, todaySets[i] || null, yesterdaySets[i] || null);
   }
 
   document.getElementById('modal-set').classList.remove('hidden');
@@ -795,14 +873,16 @@ function autoSaveSets() {
   saveDebounce = setTimeout(() => syncGymToCloud(), 1200);
 }
 
-function buildSetRow(num, prefill = null) {
+function buildSetRow(num, prefill = null, prevDefault = null) {
   const container = document.getElementById('rep-rows');
   const row = document.createElement('div');
   row.className = 'rep-row';
+  const weightPlaceholder = prevDefault ? prevDefault.weight : '–';
+  const repsPlaceholder = prevDefault ? prevDefault.reps : '–';
   row.innerHTML = `
     <span class="rep-num">${num}</span>
-    <input type="number" class="text-input set-weight-input" placeholder="–" inputmode="decimal" value="${prefill !== null ? prefill.weight : ''}" />
-    <input type="number" class="text-input set-reps-input" placeholder="–" inputmode="numeric" value="${prefill !== null ? prefill.reps : ''}" />
+    <input type="number" class="set-weight-input text-input" placeholder="${weightPlaceholder}" inputmode="decimal" value="${prefill !== null ? prefill.weight : ''}" />
+    <input type="number" class="set-reps-input text-input" placeholder="${repsPlaceholder}" inputmode="numeric" value="${prefill !== null ? prefill.reps : ''}" />
   `;
   row.querySelector('.set-weight-input').addEventListener('input', autoSaveSets);
   row.querySelector('.set-reps-input').addEventListener('input', autoSaveSets);
@@ -1423,4 +1503,9 @@ function queueDailySnapshot() {
 }
 
 // ── BOOT ───────────────────────────────────────────────
+// Hide all screens until auth is resolved to prevent flash
+document.querySelectorAll('.screen').forEach(s => {
+  s.classList.remove('active');
+  s.style.transition = 'none';
+});
 init();
