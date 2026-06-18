@@ -65,73 +65,90 @@ function loadLocal() {
 
 // ── SUPABASE: GYM ──────────────────────────────────────
 async function syncGymToCloud() {
-  if (!state.user || !state.currentWorkout) return;
-  const today = new Date().toDateString();
-  const exercises = state.data.workouts[state.currentWorkout];
+  if (!state.user) return;
+  const today = localDateStr(); // ISO yyyy-mm-dd for correct sort ordering
 
-  const todayExercises = exercises.map(ex => {
-    const todaySets = ex.sets.filter(s => new Date(s.date).toDateString() === today);
-    return { id: ex.id, name: ex.name, notes: ex.notes || '', sets: todaySets };
-  });
+  // Always save ALL three workout types so notes/order are never lost
+  // when switching between workouts or reopening the app
+  const types = ['push', 'pull', 'legs'];
+  for (const type of types) {
+    const exercises = state.data.workouts[type];
+    if (!exercises || !exercises.length) continue;
 
-  // Always upsert the full exercise list structure (for names/notes persistence)
-  const fullSnapshot = exercises.map(ex => ({
-    id: ex.id, name: ex.name, notes: ex.notes || '',
-    sets: ex.sets
-  }));
+    const fullSnapshot = exercises.map(ex => ({
+      id: ex.id,
+      name: ex.name,
+      notes: ex.notes || '',
+      repMin: ex.repMin ?? null,
+      repMax: ex.repMax ?? null,
+      sets: ex.sets
+    }));
 
-  const { error } = await sb.from('gym_logs').upsert({
-    user_id: state.user.id,
-    date: today,
-    type: state.currentWorkout,
-    snapshot: fullSnapshot,
-    updated_at: new Date().toISOString()
-  }, { onConflict: 'user_id,date,type' });
+    const { error } = await sb.from('gym_logs').upsert({
+      user_id: state.user.id,
+      date: today,
+      type,
+      snapshot: fullSnapshot,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,date,type' });
 
-  if (error) { showSync('⚠', true); console.error(error); }
-  else { showSync('✓'); queueDailySnapshot(); }
+    if (error) { showSync('⚠', true); console.error(error); return; }
+  }
+  showSync('✓');
+  queueDailySnapshot();
 }
 
 async function loadGymFromCloud() {
   if (!state.user) return;
-  // Load all gym logs to rebuild full exercise history
   const { data, error } = await sb.from('gym_logs')
     .select('*')
     .eq('user_id', state.user.id)
-    .order('date', { ascending: false });
+    .order('updated_at', { ascending: false }); // newest updated_at first
 
   if (error) { console.error(error); return; }
   if (!data || !data.length) return;
 
-  // Use the most recent snapshot's order as the master order for each type.
-  // Then merge in any sets from older snapshots that aren't already present.
   const workouts = { push: [], pull: [], legs: [] };
-  const latestByType = {};
+  const latestByType = {}; // type -> true once seeded
 
-  // Collect the most recent snapshot for each workout type
+  // First pass: seed each type from its most-recently-updated snapshot.
+  // updated_at order ensures the snapshot with the freshest notes/order wins.
   data.forEach(log => {
     const type = log.type;
     if (!workouts[type] || latestByType[type]) return;
-    latestByType[type] = log.snapshot;
-    // Seed the workout list with the latest snapshot's order/names/notes
-    workouts[type] = log.snapshot.map(ex => ({ ...ex, sets: [...ex.sets] }));
+    latestByType[type] = true;
+    workouts[type] = log.snapshot.map(ex => ({
+      id: ex.id,
+      name: ex.name,
+      notes: ex.notes || '',
+      repMin: ex.repMin ?? null,
+      repMax: ex.repMax ?? null,
+      sets: [...ex.sets]
+    }));
   });
 
-  // Now merge sets from older snapshots (process oldest to newest)
+  // Second pass: merge historical sets from all older snapshots.
+  // Process oldest-first so newest sets win on date collision.
   [...data].reverse().forEach(log => {
     const type = log.type;
     if (!workouts[type]) return;
     log.snapshot.forEach(ex => {
       const existing = workouts[type].find(e => e.id === ex.id);
       if (existing) {
-        // Merge sets by date, avoiding duplicates
         ex.sets.forEach(s => {
           const dup = existing.sets.find(es => es.date === s.date);
           if (!dup) existing.sets.push(s);
         });
       } else {
-        // Exercise existed in older logs but not latest — append at end
-        workouts[type].push({ ...ex, sets: [...ex.sets] });
+        // Exercise only in older logs — append at end
+        workouts[type].push({
+          id: ex.id,
+          name: ex.name,
+          notes: ex.notes || '',
+          repMin: ex.repMin ?? null,
+          repMax: ex.repMax ?? null,
+          sets: [...ex.sets]
+        });
       }
     });
   });
@@ -143,7 +160,7 @@ async function loadGymFromCloud() {
 // ── SUPABASE: FOODS ─────────────────────────────────────
 async function syncFoodsToCloud() {
   if (!state.user) return;
-  const today = new Date().toDateString();
+  const today = localDateStr();
   const { error } = await sb.from('food_logs').upsert({
     user_id: state.user.id,
     date: today,
@@ -157,7 +174,7 @@ async function syncFoodsToCloud() {
 
 async function loadFoodsFromCloud() {
   if (!state.user) return;
-  const today = new Date().toDateString();
+  const today = localDateStr();
   const { data, error } = await sb.from('food_logs')
     .select('*')
     .eq('user_id', state.user.id)
@@ -277,12 +294,12 @@ async function renderCalHistory() {
 // ── AUTH ────────────────────────────────────────────────
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
+  // Lift the auth-pending veil — nothing was visible until now
+  document.body.classList.remove('auth-pending');
   if (session?.user) {
     state.user = session.user;
     await onLogin();
   } else {
-    // Re-enable transitions before showing login
-    document.querySelectorAll('.screen').forEach(s => s.style.transition = '');
     showScreen('login');
   }
 }
@@ -292,8 +309,6 @@ async function onLogin() {
   ensureFoodLibrary();
   checkDailyFoodReset();
   renderExercises();
-  // Re-enable transitions before showing home
-  document.querySelectorAll('.screen').forEach(s => s.style.transition = '');
   showScreen('home');
   await loadGymFromCloud();
   await loadFoodsFromCloud();
@@ -441,75 +456,86 @@ function renderExerciseHistory(ex) {
     const setsHtml = s.sets.map((r, ri) =>
       `<div class="wh-exercise">
         <span class="wh-ex-name">Set ${ri + 1}</span>
-        <span class="wh-ex-sets wh-ex-sets-editable" data-date="${s.date}" data-set-idx="${ri}" title="Tap to edit">${r.weight}kg × ${r.reps} reps</span>
+        <span class="wh-ex-sets wh-ex-sets-editable" title="Tap to edit">${r.weight}kg × ${r.reps} reps</span>
       </div>`
     ).join('');
     section.innerHTML = `
       <div class="cal-hist-header">
         <div class="wh-date">${label}</div>
-        <button class="cal-hist-delete" title="Delete">✕</button>
       </div>
       ${setsHtml}
     `;
-    section.querySelector('.cal-hist-delete').addEventListener('click', async (e) => {
-      e.currentTarget.textContent = '…';
-      e.currentTarget.disabled = true;
-      ex.sets = ex.sets.filter(entry => entry.date !== s.date);
-      saveLocal();
-      await syncGymToCloud();
-      renderExerciseHistory(ex);
-    });
-    // Make each set row editable on tap
-    section.querySelectorAll('.wh-ex-sets-editable').forEach(el => {
-      el.addEventListener('click', () => {
-        const setIdx = parseInt(el.dataset.setIdx);
-        const entryDate = el.dataset.date;
-        const entry = ex.sets.find(e => e.date === entryDate);
-        if (!entry) return;
-        const set = entry.sets[setIdx];
-        if (!set) return;
-        openHistorySetEditor(ex, entry, setIdx, set, el);
-      });
-    });
+    // Tap anywhere on the session (date or sets) to open the edit modal
+    section.addEventListener('click', () => openSessionEditModal(ex, s, label));
     body.appendChild(section);
   });
 }
 
-function openHistorySetEditor(ex, entry, setIdx, set, labelEl) {
-  // Remove any existing inline editor
-  const existing = document.querySelector('.history-inline-editor');
-  if (existing) existing.remove();
+// ── EDIT PAST SESSION MODAL ────────────────────────────
+let editingSession = null; // { ex, entry }
 
-  const editor = document.createElement('div');
-  editor.className = 'history-inline-editor';
-  editor.innerHTML = `
-    <input type="number" class="text-input small hist-edit-weight" value="${set.weight}" inputmode="decimal" placeholder="kg" />
-    <span class="rep-range-dash">×</span>
-    <input type="number" class="text-input small hist-edit-reps" value="${set.reps}" inputmode="numeric" placeholder="reps" />
-    <button class="icon-btn hist-edit-save" style="font-size:14px;width:36px;height:36px;">✓</button>
-  `;
+function openSessionEditModal(ex, entry, label) {
+  editingSession = { ex, entry };
 
-  // Insert editor below the clicked label
-  labelEl.closest('.wh-exercise').after(editor);
-  editor.querySelector('.hist-edit-weight').focus();
+  document.getElementById('edit-session-label').textContent = label.toUpperCase();
 
-  const save = () => {
-    const newWeight = parseFloat(editor.querySelector('.hist-edit-weight').value);
-    const newReps = parseInt(editor.querySelector('.hist-edit-reps').value);
-    if (!isNaN(newWeight) && !isNaN(newReps) && newReps > 0) {
-      entry.sets[setIdx] = { weight: newWeight, reps: newReps };
-      labelEl.textContent = `${newWeight}kg × ${newReps} reps`;
-      saveLocal();
-      syncGymToCloud();
-    }
-    editor.remove();
-  };
-
-  editor.querySelector('.hist-edit-save').addEventListener('click', save);
-  editor.querySelectorAll('input').forEach(inp => {
-    inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+  const rowsEl = document.getElementById('edit-session-rows');
+  rowsEl.innerHTML = '';
+  entry.sets.forEach((set, i) => {
+    const row = document.createElement('div');
+    row.className = 'rep-row';
+    row.innerHTML = `
+      <span class="rep-num">${i + 1}</span>
+      <input type="number" class="text-input set-weight-input" inputmode="decimal" value="${set.weight}" />
+      <input type="number" class="text-input set-reps-input" inputmode="numeric" value="${set.reps}" />
+    `;
+    row.querySelector('.set-weight-input').addEventListener('input', autoSaveEditingSession);
+    row.querySelector('.set-reps-input').addEventListener('input', autoSaveEditingSession);
+    rowsEl.appendChild(row);
   });
+
+  document.getElementById('modal-edit-session').classList.remove('hidden');
 }
+
+let sessionEditDebounce = null;
+function autoSaveEditingSession() {
+  if (!editingSession) return;
+  const rows = document.querySelectorAll('#edit-session-rows .rep-row');
+  const newSets = [];
+  rows.forEach((row, i) => {
+    const weight = parseFloat(row.querySelector('.set-weight-input').value);
+    const reps = parseInt(row.querySelector('.set-reps-input').value);
+    if (!isNaN(weight) && !isNaN(reps) && reps > 0) {
+      newSets.push({ weight, reps });
+    } else {
+      // Keep old value if input is blank/invalid
+      newSets.push(editingSession.entry.sets[i] || { weight: 0, reps: 0 });
+    }
+  });
+  editingSession.entry.sets = newSets;
+  saveLocal();
+  clearTimeout(sessionEditDebounce);
+  sessionEditDebounce = setTimeout(() => syncGymToCloud(), 1200);
+}
+
+function closeSessionEditModal() {
+  document.getElementById('modal-edit-session').classList.add('hidden');
+  editingSession = null;
+}
+
+document.getElementById('modal-edit-session').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-edit-session')) closeSessionEditModal();
+});
+
+document.getElementById('edit-session-delete').addEventListener('click', async () => {
+  if (!editingSession) return;
+  const { ex, entry } = editingSession;
+  ex.sets = ex.sets.filter(s => s !== entry);
+  saveLocal();
+  closeSessionEditModal();
+  await syncGymToCloud();
+  renderExerciseHistory(ex);
+});
 
 
 function renderExercises() {
@@ -1447,18 +1473,18 @@ async function saveDailySnapshot(dateStr) {
 
   // Collect gym sets done that day across all workout types
   const gymSummary = {};
-  const dayStr = new Date(dateStr + 'T12:00:00').toDateString();
   for (const type of ['push', 'pull', 'legs']) {
     const { data: gymRows } = await sb.from('gym_logs')
       .select('snapshot')
       .eq('user_id', state.user.id)
-      .eq('date', dayStr)
+      .eq('date', dateStr)   // ISO yyyy-mm-dd — matches what syncGymToCloud writes
       .eq('type', type)
       .single();
     if (gymRows?.snapshot) {
       const exercises = [];
+      // Sets store full ISO timestamps; check by comparing localDateStr
       gymRows.snapshot.forEach(ex => {
-        const daySets = ex.sets.filter(s => new Date(s.date).toDateString() === dayStr);
+        const daySets = ex.sets.filter(s => localDateStr(new Date(s.date)) === dateStr);
         if (daySets.length) {
           exercises.push({ name: ex.name, sets: daySets });
         }
@@ -1484,11 +1510,10 @@ async function sealYesterdayIfNeeded() {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const yStr = localDateStr(yesterday);
-  const dayStr = yesterday.toDateString();
   const { data: foodRow } = await sb.from('food_logs')
     .select('date')
     .eq('user_id', state.user.id)
-    .eq('date', dayStr)
+    .eq('date', yStr)   // ISO yyyy-mm-dd — matches what syncFoodsToCloud writes
     .single();
   if (foodRow) await saveDailySnapshot(yStr);
 }
@@ -1503,9 +1528,4 @@ function queueDailySnapshot() {
 }
 
 // ── BOOT ───────────────────────────────────────────────
-// Hide all screens until auth is resolved to prevent flash
-document.querySelectorAll('.screen').forEach(s => {
-  s.classList.remove('active');
-  s.style.transition = 'none';
-});
 init();

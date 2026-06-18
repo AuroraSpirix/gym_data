@@ -6,10 +6,10 @@
   <title>GRIND</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="auth-pending">
 
   <!-- LOGIN SCREEN -->
-  <div id="screen-login" class="screen active">
+  <div id="screen-login" class="screen">
     <div class="login-body">
       <div class="login-logo">GRIND</div>
       <div class="login-fields">
@@ -195,6 +195,22 @@
         <button id="workout-history-close" class="notes-btn">✕</button>
       </div>
       <div id="workout-history-body" class="workout-history-body"></div>
+    </div>
+  </div>
+
+  <!-- EDIT PAST SESSION MODAL -->
+  <div id="modal-edit-session" class="modal hidden">
+    <div class="modal-box">
+      <span class="modal-picker-label" id="edit-session-label">EDIT SESSION</span>
+      <div class="rep-logger">
+        <div class="rep-logger-header">
+          <span class="rep-col-label">SET</span>
+          <span class="rep-col-label">WEIGHT (kg)</span>
+          <span class="rep-col-label">REPS</span>
+        </div>
+        <div id="edit-session-rows"></div>
+      </div>
+      <button type="button" class="delete-food-library-btn" id="edit-session-delete">DELETE SESSION</button>
     </div>
   </div>
 

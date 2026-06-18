@@ -35,6 +35,8 @@ html, body {
   pointer-events: none;
   transition: opacity 0.15s;
 }
+/* Keep everything hidden until auth resolves, regardless of JS timing */
+body.auth-pending .screen { opacity: 0 !important; pointer-events: none !important; }
 .screen.active  { opacity: 1; pointer-events: all; }
 .screen.leaving { opacity: 0; }
 
@@ -1018,25 +1020,14 @@ input:-webkit-autofill:focus {
 }
 
 /* ── EDITABLE HISTORY SETS ── */
-.wh-ex-sets-editable {
+.wh-session {
   cursor: pointer;
-  border-bottom: 1px dashed #444;
-  transition: color 0.15s, border-color 0.15s;
 }
-.wh-ex-sets-editable:active { color: var(--white); border-color: var(--white); }
-
-.history-inline-editor {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 0 8px 0;
+.wh-session:active .wh-date,
+.wh-session:active .wh-ex-sets {
+  color: var(--white);
+  opacity: 0.7;
 }
-.history-inline-editor .text-input {
-  width: 70px;
-  flex: none;
-  padding: 8px 6px;
-  font-size: 13px;
-}
-.history-inline-editor .rep-range-dash {
-  flex-shrink: 0;
+.wh-ex-sets-editable {
+  color: var(--white);
 }
