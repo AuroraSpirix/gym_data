@@ -294,12 +294,30 @@ async function renderCalHistory() {
 // ── AUTH ────────────────────────────────────────────────
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
-  // Lift the auth-pending veil — nothing was visible until now
-  document.body.classList.remove('auth-pending');
   if (session?.user) {
     state.user = session.user;
-    await onLogin();
+    // Remove the login screen from the DOM entirely so the browser's
+    // password manager never sees the email/password inputs and won't
+    // pop up the "saved passwords" sheet on mobile.
+    const loginScreen = document.getElementById('screen-login');
+    if (loginScreen) loginScreen.remove();
+    // Load local data and activate home BEFORE lifting the veil,
+    // so the first visible frame is always the home screen.
+    state.data = loadLocal();
+    ensureFoodLibrary();
+    checkDailyFoodReset();
+    renderExercises();
+    document.getElementById('screen-home').classList.add('active');
+    document.body.classList.remove('auth-pending');
+    // Then fetch cloud data in the background
+    loadGymFromCloud().then(() => renderExercises());
+    loadFoodsFromCloud();
+    loadFoodLibraryFromCloud().then(() => { ensureFoodLibrary(); });
+    loadWeightFromCloud();
+    sealYesterdayIfNeeded();
+    queueDailySnapshot();
   } else {
+    document.body.classList.remove('auth-pending');
     showScreen('login');
   }
 }
